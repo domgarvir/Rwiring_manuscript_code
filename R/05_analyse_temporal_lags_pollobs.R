@@ -673,7 +673,7 @@ saveRDS(
 ggsave(
   filename = file.path(
     figure_dir,
-    "Figure_S7_temporal_lag_comparisons.pdf"
+    "Figure_S5_temporal_lag_comparisons.pdf"
   ),
   plot = plot_temporal_lags,
   width = 13,
@@ -685,7 +685,7 @@ ggsave(
 ggsave(
   filename = file.path(
     figure_dir,
-    "Figure_S7_temporal_lag_comparisons.png"
+    "Figure_S5_temporal_lag_comparisons.png"
   ),
   plot = plot_temporal_lags,
   width = 13,

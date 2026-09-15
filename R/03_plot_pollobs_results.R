@@ -932,256 +932,9 @@ plot_node_dynamics_all <- ggplot() +
     )
   )
 
-# =============================================================================
-# 12. Supplementary figure S5: net species assembly balance
-# =============================================================================
-
-plot_node_assembly_balance_all <- ggplot(
-  node_assembly_balance,
-  aes(
-    x = Mid_date,
-    y = Node_assembly_balance,
-    colour = Site
-  )
-) +
-  geom_hline(
-    yintercept = 0,
-    linetype = "dashed",
-    colour = "grey55"
-  ) +
-  geom_line(
-    aes(group = interaction(Site, Guild)),
-    linewidth = 0.6
-  ) +
-  geom_point(aes(size = Total_node_change)) +
-  facet_grid(
-    Guild ~ Site,
-    labeller = labeller(Guild = guild_labels)
-  ) +
-  scale_colour_manual(values = garden_colours, guide = "none") +
-  scale_x_date(
-    date_breaks = "3 weeks",
-    date_labels = "%d %b"
-  ) +
-  scale_y_continuous(
-    limits = c(-1, 1),
-    breaks = seq(-1, 1, 0.5)
-  ) +
-  scale_size_continuous(
-    name = expression("Species changes, " ~ G[S] + L[S]),
-    range = c(1.5, 5)
-  ) +
-  labs(
-    x = "Comparison midpoint",
-    y = expression(
-      "Net species assembly balance, " ~
-        frac(G[S] - L[S], G[S] + L[S])
-    )
-  ) +
-  guides(size = guide_legend(nrow = 1)) +
-  theme_pollobs() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  )
-
 
 # =============================================================================
-# 13. Supplementary figure S6:
-#     species assembly and disassembly through time in Halle
-# =============================================================================
-
-# Summarise permanent, lost, and gained species for each guild and comparison.
-halle_node_dynamics <- node_status_summary %>%
-  filter(Site == selected_site) %>%
-  select(
-    Site,
-    Guild,
-    Week_1,
-    Week_2,
-    Mid_day,
-    Mid_date,
-    Transition,
-    Node_status_label,
-    n_nodes
-  ) %>%
-  pivot_wider(
-    names_from = Node_status_label,
-    values_from = n_nodes,
-    values_fill = 0
-  ) %>%
-  mutate(
-    Total = Permanent + Lost + Gained
-  ) %>%
-  arrange(
-    Guild,
-    Mid_day
-  )
-
-# Convert gained and lost species to a long format. Losses are plotted below
-# zero to distinguish species assembly from species disassembly.
-halle_node_bars <- halle_node_dynamics %>%
-  select(
-    Site,
-    Guild,
-    Mid_day,
-    Mid_date,
-    Transition,
-    Gained,
-    Lost
-  ) %>%
-  pivot_longer(
-    cols = c(Gained, Lost),
-    names_to = "Species_change",
-    values_to = "n_species"
-  ) %>%
-  mutate(
-    Plot_value = if_else(
-      Species_change == "Lost",
-      -n_species,
-      n_species
-    ),
-    Species_change = factor(
-      Species_change,
-      levels = c("Gained", "Lost")
-    )
-  )
-
-# Convert total and permanent species to a long format for the two lines.
-halle_node_lines <- halle_node_dynamics %>%
-  select(
-    Site,
-    Guild,
-    Mid_day,
-    Mid_date,
-    Transition,
-    Total,
-    Permanent
-  ) %>%
-  pivot_longer(
-    cols = c(Total, Permanent),
-    names_to = "Species_pool",
-    values_to = "n_species"
-  ) %>%
-  mutate(
-    Species_pool = factor(
-      Species_pool,
-      levels = c("Total", "Permanent")
-    )
-  )
-
-# Use symmetric y-axis limits to make gains and losses directly comparable.
-node_axis_limit <- max(
-  abs(halle_node_bars$Plot_value),
-  halle_node_lines$n_species,
-  na.rm = TRUE
-)
-
-node_axis_limit <- ceiling(
-  node_axis_limit / 10
-) * 10
-
-plot_node_dynamics_halle <- ggplot() +
-  geom_hline(
-    yintercept = 0,
-    linewidth = 0.5,
-    colour = "grey25"
-  ) +
-  geom_col(
-    data = halle_node_bars,
-    aes(
-      x = Mid_day,
-      y = Plot_value,
-      fill = Species_change
-    ),
-    width = 4.5,
-    alpha = 0.80
-  ) +
-  geom_line(
-    data = halle_node_lines,
-    aes(
-      x = Mid_day,
-      y = n_species,
-      colour = Species_pool,
-      group = Species_pool
-    ),
-    linewidth = 1.05
-  ) +
-  geom_point(
-    data = halle_node_lines,
-    aes(
-      x = Mid_day,
-      y = n_species,
-      colour = Species_pool
-    ),
-    size = 2.8
-  ) +
-  facet_wrap(
-    ~ Guild,
-    ncol = 1,
-    scales = "free_y",
-    labeller = labeller(
-      Guild = guild_labels
-    )
-  ) +
-  scale_fill_manual(
-    values = c(
-      Gained = node_status_colours[["Gained"]],
-      Lost = node_status_colours[["Lost"]]
-    ),
-    breaks = c("Gained", "Lost"),
-    name = "Species change"
-  ) +
-  scale_colour_manual(
-    values = c(
-      Total = "grey45",
-      Permanent = "#007A4D"
-    ),
-    breaks = c("Total", "Permanent"),
-    name = "Species pool"
-  ) +
-  scale_x_continuous(
-    breaks = transition_axis_halle$Mid_day,
-    labels = transition_axis_halle$Transition
-  ) +
-  scale_y_continuous(
-    labels = function(x) abs(x),
-    expand = expansion(
-      mult = c(0.08, 0.08)
-    )
-  ) +
-  labs(
-    x = "Successive network comparison",
-    y = "Number of species"
-  ) +
-  guides(
-    colour = guide_legend(
-      order = 1,
-      nrow = 1,
-      override.aes = list(
-        linewidth = 1.05,
-        size = 2.8
-      )
-    ),
-    fill = guide_legend(
-      order = 2,
-      nrow = 1
-    )
-  ) +
-  theme_pollobs(base_size = 14) +
-  theme(
-    axis.text.x = element_text(
-      angle = 90,
-      hjust = 1,
-      vjust = 0.5
-    ),
-    legend.box = "vertical",
-    legend.title.position = "top"
-  )
-
-plot_node_dynamics_halle
-
-# =============================================================================
-# 15. Supplementary figure S7: species and interaction reorganization by garden
+# 14. Supplementary figure S7: species and interaction reorganization by garden
 # =============================================================================
 
 change_colours <- c(
@@ -1364,7 +1117,7 @@ plot_species_reorganization <- ggplot(
 
 
 # -----------------------------------------------------------------------------
-# 15B. Interaction reorganization
+# 14B. Interaction reorganization
 # -----------------------------------------------------------------------------
 
 interaction_plot_data <- link_category_summary %>%
@@ -1551,7 +1304,7 @@ plot_interaction_reorganization <- ggplot(
   )
 
 # -----------------------------------------------------------------------------
-# 15C. Assemble the two columns
+# 14C. Assemble the two columns
 # -----------------------------------------------------------------------------
 
 plot_reorganization_all_gardens <- (
@@ -1605,46 +1358,12 @@ save_plot_both(
   dpi = 600
 )
 
-save_plot_both(
-  plot_link_assembly_balance_all,
-  "Figure_S4_link_assembly_balance_all_gardens",
-  directory = supplementary_dir,
-  width = 8,
-  height = 9
-)
-
-save_plot_both(
-  plot_node_assembly_balance_all,
-  "Figure_S5_node_assembly_balance_all_gardens",
-  directory = supplementary_dir,
-  width = 13,
-  height = 7
-)
-
-save_plot_both(
-  plot_node_dynamics_halle,
-  "Figure_S6_node_dynamics_Halle",
-  directory = supplementary_dir,
-  width = 12,
-  height = 8
-)
 
 save_plot_both(
   plot_reorganization_all_gardens,
-  "Figure_S8_species_and_interaction_reorganization",
+  "Figure_S4_species_and_interaction_reorganization",
   directory = supplementary_dir,
   width = 14,
   height = 11,
   dpi = 600
 )
-
-# Useful objects to inspect after sourcing this script:
-# pollobs_main_figure
-# panel_A
-# panel_B
-# panel_C
-# plot_link_categories_all
-# plot_mechanism_proportions_all
-# plot_node_status_all
-# plot_link_assembly_balance_all
-# plot_node_assembly_balance_all

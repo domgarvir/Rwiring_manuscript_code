@@ -83,7 +83,7 @@ change_colours <- c(
 )
 
 guild_labels <- c(
-  floral_visitor = "Floral visitors",
+  floral_visitor = "Pollinators",
   plant = "Plants"
 )
 
@@ -268,13 +268,13 @@ species_plot_data <- node_status_summary %>%
     Guild_label = recode(
       Guild,
       plant = "Flowering plants",
-      floral_visitor = "Floral visitors"
+      floral_visitor = "Pollinators"
     ),
     Guild_label = factor(
       Guild_label,
       levels = c(
         "Flowering plants",
-        "Floral visitors"
+        "Pollinators"
       )
     ),
     Change_status = recode(
@@ -820,7 +820,7 @@ plot_node_dynamics_all <- ggplot() +
     scales = "free_y",
     labeller = labeller(
       Guild = c(
-        floral_visitor = "Floral visitors",
+        floral_visitor = "Pollinators",
         plant = "Flowering plants"
       )
     )
@@ -958,13 +958,13 @@ species_plot_data <- node_status_summary %>%
     Guild_label = recode(
       Guild,
       plant = "Flowering plants",
-      floral_visitor = "Floral visitors"
+      floral_visitor = "Pollinators"
     ),
     Guild_label = factor(
       Guild_label,
       levels = c(
         "Flowering plants",
-        "Floral visitors"
+        "Pollinators"
       )
     ),
     Change_status = recode(

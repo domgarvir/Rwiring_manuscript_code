@@ -37,6 +37,9 @@ garden_levels <- c(
   "Leipzig"
 )
 
+# Garden used to illustrate within-season temporal reorganization.
+selected_site <- "Halle"
+
 lag_colours <- c(
   "t+1" = "#00441B",
   "t+2" = "#238B45",
@@ -46,7 +49,7 @@ lag_colours <- c(
 
 metric_labels <- c(
   permanent_floral_visitors =
-    "Permanent floral visitors",
+    "Permanent pollinators",
   permanent_plants =
     "Permanent flowering plants",
   persistent_interactions =
@@ -569,6 +572,11 @@ lag_labels <- c(
   "t+4" = "t+4 (~30 days)"
 )
 
+
+# -----------------------------------------------------------------------------
+# 9A. Comparison among all botanical gardens
+# -----------------------------------------------------------------------------
+
 plot_temporal_lags <- ggplot(
   lag_summary,
   aes(
@@ -642,6 +650,178 @@ plot_temporal_lags <- ggplot(
 
 plot_temporal_lags
 
+# -----------------------------------------------------------------------------
+# 9B. Temporal-lag pattern in Halle
+# -----------------------------------------------------------------------------
+
+lag_summary_halle <- lag_summary %>%
+  filter(
+    Site == "Halle"
+  ) %>%
+  mutate(
+    Lag_axis = factor(
+      Lag_label,
+      levels = c(
+        "t+1",
+        "t+2",
+        "t+3",
+        "t+4"
+      ),
+      labels = c(
+        "L1",
+        "L2",
+        "L3",
+        "L4"
+      )
+    )
+  )
+
+lag_legend_labels <- c(
+  "t+1" = "L1: t+1 (~7 days)",
+  "t+2" = "L2: t+2 (~15 days)",
+  "t+3" = "L3: t+3 (~23 days)",
+  "t+4" = "L4: t+4 (~30 days)"
+)
+
+
+plot_temporal_lags_halle <- ggplot(
+  lag_summary_halle,
+  aes(
+    x = Lag_axis,
+    y = Mean,
+    colour = Lag_label
+  )
+) +
+  geom_errorbar(
+    aes(
+      ymin = Lower_SD,
+      ymax = Upper_SD
+    ),
+    width = 0,
+    linewidth = 0.9
+  ) +
+  geom_point(
+    size = 3.8
+  ) +
+  facet_wrap(
+    ~ Metric,
+    nrow = 1
+  ) +
+  scale_colour_manual(
+    values = lag_colours,
+    breaks = names(lag_legend_labels),
+    labels = lag_legend_labels,
+    drop = FALSE,
+    name = "Time lag"
+  ) +
+  scale_x_discrete(
+    drop = FALSE
+  ) +
+  scale_y_continuous(
+    breaks = seq(
+      0,
+      0.7,
+      by = 0.2
+    ),
+    labels = scales::percent_format(
+      accuracy = 1
+    ),
+    expand = expansion(
+      mult = c(0.02, 0.06)
+    )
+  ) +
+  coord_cartesian(
+    ylim = c(0, 0.5)
+  ) +
+  labs(
+    x = NULL,
+    y = NULL
+  ) +
+  guides(
+    colour = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1,
+      byrow = TRUE,
+      override.aes = list(
+        shape = 15,
+        size = 7,
+        linewidth = 0
+      )
+    )
+  ) +
+  theme_pollobs(base_size = 15) +
+  theme(
+    strip.background = element_rect(
+      fill = "white",
+      colour = "grey20",
+      linewidth = 0.7
+    ),
+    strip.text = element_text(
+      face = "plain",
+      size = 15,
+      margin = margin(
+        t = 5,
+        r = 5,
+        b = 5,
+        l = 5
+      )
+    ),
+    axis.text.x = element_text(
+      size = 14,
+      colour = "black",
+      margin = margin(t = 5)
+    ),
+    axis.text.y = element_text(
+      size = 13,
+      colour = "black"
+    ),
+    axis.line = element_line(
+      colour = "grey40",
+      linewidth = 0.6
+    ),
+    axis.ticks = element_line(
+      colour = "grey40",
+      linewidth = 0.6
+    ),
+    axis.ticks.length = grid::unit(
+      0.12,
+      "cm"
+    ),
+    panel.spacing = grid::unit(
+      1,
+      "lines"
+    ),
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.box.just = "center",
+    legend.title = element_text(
+      size = 14
+    ),
+    legend.text = element_text(
+      size = 13
+    ),
+    legend.key.width = grid::unit(
+      0.75,
+      "cm"
+    ),
+    legend.key.height = grid::unit(
+      0.55,
+      "cm"
+    ),
+    legend.spacing.x = grid::unit(
+      0.25,
+      "cm"
+    ),
+    plot.margin = margin(
+      t = 8,
+      r = 8,
+      b = 8,
+      l = 8
+    )
+  )
+
+plot_temporal_lags_halle
 
 # =============================================================================
 # 10. Export data and figure
@@ -690,6 +870,31 @@ ggsave(
   plot = plot_temporal_lags,
   width = 13,
   height = 4.8,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
+
+ggsave(
+  filename = file.path(
+    figure_dir,
+    "Figure_temporal_lag_comparisons_Halle.pdf"
+  ),
+  plot = plot_temporal_lags_halle,
+  width = 12.5,
+  height = 4.4,
+  units = "in",
+  bg = "white"
+)
+
+ggsave(
+  filename = file.path(
+    figure_dir,
+    "Figure_temporal_lag_comparisons_Halle.png"
+  ),
+  plot = plot_temporal_lags_halle,
+  width = 12.5,
+  height = 4.4,
   units = "in",
   dpi = 600,
   bg = "white"

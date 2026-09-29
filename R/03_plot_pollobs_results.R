@@ -82,6 +82,21 @@ change_colours <- c(
   "Gained" = "#E69F00"
 )
 
+# Horizontal separation between the centres of the lost and gained bars.
+# A value of 0 places both bars on the same vertical axis; 0.20 produces the
+# slight overlap used in the Python reference figure.
+loss_gain_separation <- 0.16
+
+# Width of the bars in panels B and C and in Supplementary Figure S4. Because
+# this is slightly larger than loss_gain_separation, lost and gained bars
+# overlap horizontally while remaining visually distinguishable.
+reorganization_bar_width <- 0.28
+
+# In the species panels, keep the permanent bar to the left and place the
+# overlapping lost/gained pair to its right, as in the reference figure.
+species_permanent_offset <- -0.27
+species_change_pair_centre <- 0.13
+
 guild_labels <- c(
   floral_visitor = "Pollinators",
   plant = "Plants"
@@ -201,63 +216,174 @@ transition_axis_halle <- comparisons %>%
 
 stopifnot(!anyDuplicated(transition_axis_halle$Mid_day))
 
-main_panel_A <- ggplot(
-  link_category_summary %>%
-    filter(Site == selected_site),
-  aes(
-    x = Mid_day,
-    y = n_links,
-    fill = Category
+legend_breaks <- c(
+  "Persistent",
+  "Lost: rewiring",
+  "Lost: one transient species",
+  "Lost: two transient species",
+  "Spacer",
+  "Gained: rewiring",
+  "Gained: one transient species",
+  "Gained: two transient species"
+)
+
+legend_labels <- c(
+  "Persistent",
+  "Lost: rewiring",
+  "Lost: one transient species",
+  "Lost: two transient species",
+  "",
+  "Gained: rewiring",
+  "Gained: one transient species",
+  "Gained: two transient species"
+)
+
+theme_panel_frame <- theme(
+  panel.border = element_rect(
+    colour = "grey40",
+    fill = NA,
+    linewidth = 0.55
+  ),
+  axis.line = element_blank()
+)
+
+# Each comparison has two vertically aligned panels: persistent links above,
+# and gained (positive) / lost (negative) links below. Both use the same x axis.
+plot_link_change_pair <- function(
+    data,
+    x_var,
+    x_scale,
+    site_label = NULL,
+    panel_tag = NULL,
+    x_title = "Weekly network comparison",
+    base_size = 13) {
+  
+  persistent <- data %>% filter(Category == "Persistent")
+  changes <- data %>%
+    filter(Category != "Persistent") %>%
+    mutate(signed_links = if_else(
+      grepl("^Lost:", as.character(Category)), -n_links, n_links
+    ))
+  
+  changes_for_plot <- bind_rows(
+    changes,
+    persistent %>%
+      slice(1) %>%
+      mutate(
+        n_links = 0,
+        signed_links = 0
+      )
   )
-) +
-  geom_col(width = 4.5) +
-  scale_fill_manual(
-    values = category_colours,
-    breaks = category_levels,
-    drop = FALSE,
-    name = "Interaction-change category"
-  ) +
-  scale_x_continuous(
-    breaks = transition_axis_halle$Mid_day,
-    labels = transition_axis_halle$Transition
-  ) +
-  scale_y_continuous(
-    expand = expansion(mult = c(0, 0.05))
-  ) +
-  labs(
-    tag = "A",
-    x = "Successive network comparison",
-    y = "Number of interactions"
-  ) +
-  guides(
-    fill = guide_legend(
-      title.position = "top",
-      title.hjust = 0.5,
-      nrow = 2,
-      byrow = TRUE
+
+  common <- list(
+    geom_hline(yintercept = 0, colour = "grey35", linewidth = 0.35),
+    x_scale,
+    theme_pollobs(base_size),
+    theme(
+      panel.grid = element_blank(),
+      plot.margin = margin(2, 8, 2, 8)
+    )
+  )
+
+  top <- ggplot(persistent, aes(x = .data[[x_var]], y = n_links)) +
+    geom_col(width = 4.5, fill = unname(category_colours["Persistent"])) +
+    common +
+    scale_y_continuous(
+      breaks = seq(0, 100, by = 50),
+      limits = c(0, 100),
+      expand = expansion(mult = c(0, 0))
+    ) +
+    labs(title = site_label, tag = panel_tag,
+         x = NULL, y = "Persistent\ninteractions") +
+    theme(
+      axis.text.x = element_blank(),
+      axis.ticks.x = element_blank(),
+      axis.line.x = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = base_size),
+      plot.tag = element_text(face = "bold", size = base_size + 2),
+      plot.margin = margin(
+        t = 2,
+        r = 8,
+        b = 6,
+        l = 8
+      )
+    ) +
+    theme_panel_frame
+
+  bottom <- ggplot(
+    changes_for_plot,
+    aes(
+      x = .data[[x_var]],
+      y = signed_links,
+      fill = Category
     )
   ) +
-  theme_pollobs(base_size = 15) +
-  theme(
-    plot.tag = element_text(
-      face = "bold",
-      size = 17
-    ),
-    plot.tag.position = c(0.01, 0.99),
-    axis.text.x = element_text(
-      size = 12,
-      angle = 90,
-      hjust = 1,
-      vjust = 0.5
-    ),
-    axis.text.y = element_text(size = 12),
-    legend.position = "bottom",
-    legend.title = element_text(size = 13),
-    legend.text = element_text(size = 11),
-    legend.key.width = grid::unit(0.45, "cm"),
-    legend.key.height = grid::unit(0.45, "cm"),
-    legend.margin = margin(t = 2, b = 2)
-  )
+    geom_col(width = 4.5) +
+    common +
+    scale_fill_manual(
+      values = c(
+        category_colours,
+        "Spacer" = "transparent"
+      ),
+      breaks = legend_breaks,
+      labels = legend_labels,
+      name = "Interaction-change category",
+      drop = FALSE
+    ) +
+    scale_y_continuous(
+      expand = expansion(
+        mult = c(0.06, 0.06)
+      )
+    ) +
+    labs(
+      x = x_title,
+      y = "Gained / lost\ninteractions"
+    ) +
+    guides(
+      fill = guide_legend(
+        title.position = "top",
+        title.hjust = 0.5,
+        nrow = 2,
+        byrow = TRUE
+      )
+    ) +
+    theme(
+      axis.text.x = element_text(
+        angle = 90,
+        hjust = 1,
+        vjust = 0.5
+      ),
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.justification = "center",
+      legend.box.just = "center",
+      plot.margin = margin(
+        t = 6,
+        r = 8,
+        b = 2,
+        l = 8
+      )
+    ) +
+    theme_panel_frame
+  
+  (top / bottom) +
+    plot_layout(
+      heights = c(0.8, 1.6)
+    )
+}
+
+main_panel_A <- plot_link_change_pair(
+  link_category_summary %>%
+    filter(Site == selected_site),
+  x_var = "Mid_day",
+  x_scale = scale_x_continuous(
+    breaks = transition_axis_halle$Mid_day,
+    labels = transition_axis_halle$Transition
+  ),
+  site_label = "Interaction reorganization through time",
+  panel_tag = "A",
+  base_size = 15
+)
 
 # =============================================================================
 # 4. Prepare data for the species and interaction summary panels
@@ -344,6 +470,16 @@ halle_species_data <- species_plot_data %>%
     Change_status = factor(
       Change_status,
       levels = change_levels
+    ),
+    X_base = as.numeric(Guild_label),
+    X_plot = X_base + case_when(
+      Change_status == "Permanent / persistent" ~
+        species_permanent_offset,
+      Change_status == "Lost" ~
+        species_change_pair_centre - loss_gain_separation / 2,
+      Change_status == "Gained" ~
+        species_change_pair_centre + loss_gain_separation / 2,
+      TRUE ~ 0
     )
   )
 
@@ -355,6 +491,7 @@ halle_species_summary <- halle_species_data %>%
   summarise(
     Mean = mean(Plot_value, na.rm = TRUE),
     SD = sd(Plot_value, na.rm = TRUE),
+    X_plot = first(X_plot),
     .groups = "drop"
   ) %>%
   mutate(
@@ -368,6 +505,14 @@ halle_interaction_data <- interaction_plot_data %>%
     Category = factor(
       Category,
       levels = category_levels
+    ),
+    X_base = as.numeric(Mechanism_group),
+    X_plot = X_base + case_when(
+      Change_status == "Lost" ~
+        -loss_gain_separation / 2,
+      Change_status == "Gained" ~
+        loss_gain_separation / 2,
+      TRUE ~ 0
     )
   )
 
@@ -380,6 +525,7 @@ halle_interaction_summary <- halle_interaction_data %>%
   summarise(
     Mean = mean(Plot_value, na.rm = TRUE),
     SD = sd(Plot_value, na.rm = TRUE),
+    X_plot = first(X_plot),
     .groups = "drop"
   ) %>%
   mutate(
@@ -391,25 +537,21 @@ halle_interaction_summary <- halle_interaction_data %>%
 # 5. Main-text figure, panel B: mean species reorganization
 # =============================================================================
 
-position_species <- position_dodge(width = 0.72)
-
 main_panel_B <- ggplot(
   halle_species_summary,
   aes(
-    x = Guild_label,
+    x = X_plot,
     y = Mean,
-    fill = Change_status,
-    group = Change_status
+    fill = Change_status
   )
 ) +
+  geom_col(
+    width = reorganization_bar_width
+  ) +
   geom_hline(
     yintercept = 0,
     colour = "grey25",
     linewidth = 0.5
-  ) +
-  geom_col(
-    width = 0.65,
-    position = position_species
   ) +
   geom_errorbar(
     aes(
@@ -417,15 +559,13 @@ main_panel_B <- ggplot(
       ymax = Upper
     ),
     width = 0.12,
-    linewidth = 0.65,
-    position = position_species
+    linewidth = 0.65
   ) +
   geom_point(
     data = halle_species_data,
     aes(
-      x = Guild_label,
-      y = Plot_value,
-      group = Change_status
+      x = X_plot,
+      y = Plot_value
     ),
     inherit.aes = FALSE,
     shape = 1,
@@ -434,17 +574,22 @@ main_panel_B <- ggplot(
     size = 1.5,
     stroke = 0.4,
     alpha = 0.65,
-    position = position_jitterdodge(
-      jitter.width = 0.10,
-      dodge.width = 0.72,
+    position = position_jitter(
+      width = 0.045,
+      height = 0,
       seed = 24
     )
+  ) +
+  scale_x_continuous(
+    breaks = seq_along(levels(halle_species_data$Guild_label)),
+    labels = levels(halle_species_data$Guild_label),
+    expand = expansion(mult = c(0.12, 0.12))
   ) +
   scale_fill_manual(
     values = change_colours,
     breaks = change_levels,
     labels = c(
-      "Permanent / persistent" = "Permanent",
+      "Permanent / persistent" = "Persistent",
       "Lost" = "Lost",
       "Gained" = "Gained"
     ),
@@ -487,31 +632,28 @@ main_panel_B <- ggplot(
     legend.key.width = grid::unit(0.4, "cm"),
     legend.key.height = grid::unit(0.4, "cm"),
     legend.margin = margin(t = 2, b = 2)
-  )
+  ) +
+  theme_panel_frame
 
 # =============================================================================
 # 6. Main-text figure, panel C: mean interaction reorganization
 # =============================================================================
 
-position_interactions <- position_dodge(width = 0.72)
-
 main_panel_C <- ggplot(
   halle_interaction_summary,
   aes(
-    x = Mechanism_group,
+    x = X_plot,
     y = Mean,
-    fill = Category,
-    group = Change_status
+    fill = Category
   )
 ) +
+  geom_col(
+    width = reorganization_bar_width
+  ) +
   geom_hline(
     yintercept = 0,
     colour = "grey25",
     linewidth = 0.5
-  ) +
-  geom_col(
-    width = 0.65,
-    position = position_interactions
   ) +
   geom_errorbar(
     aes(
@@ -519,15 +661,13 @@ main_panel_C <- ggplot(
       ymax = Upper
     ),
     width = 0.12,
-    linewidth = 0.65,
-    position = position_interactions
+    linewidth = 0.65
   ) +
   geom_point(
     data = halle_interaction_data,
     aes(
-      x = Mechanism_group,
-      y = Plot_value,
-      group = Change_status
+      x = X_plot,
+      y = Plot_value
     ),
     inherit.aes = FALSE,
     shape = 1,
@@ -536,11 +676,16 @@ main_panel_C <- ggplot(
     size = 1.5,
     stroke = 0.4,
     alpha = 0.65,
-    position = position_jitterdodge(
-      jitter.width = 0.10,
-      dodge.width = 0.72,
+    position = position_jitter(
+      width = 0.045,
+      height = 0,
       seed = 24
     )
+  ) +
+  scale_x_continuous(
+    breaks = seq_along(levels(halle_interaction_data$Mechanism_group)),
+    labels = levels(halle_interaction_data$Mechanism_group),
+    expand = expansion(mult = c(0.08, 0.08))
   ) +
   scale_fill_manual(
     values = category_colours,
@@ -571,7 +716,8 @@ main_panel_C <- ggplot(
     ),
     plot.tag.position = c(0.01, 0.99),
     legend.position = "none"
-  )
+  ) +
+  theme_panel_frame
 
 # =============================================================================
 # 7. Assemble the main-text figure
@@ -593,43 +739,101 @@ pollobs_main_figure <- patchwork::wrap_plots(
 )
 
 # =============================================================================
-# 8. Supplementary figure S1: link-change categories in all gardens
+# 8. Supplementary figure S1:
+#    interaction reorganization through time in all gardens
 # =============================================================================
 
-plot_link_categories_all <- ggplot(
-  link_category_summary,
-  aes(
-    x = Mid_date,
-    y = n_links,
-    fill = Category
-  )
-) +
-  geom_col(width = 4.5) +
-  facet_wrap(~ Site, ncol = 1) +
-  scale_fill_manual(
-    values = category_colours,
-    breaks = category_levels,
-    drop = FALSE
-  ) +
-  scale_x_date(
-    date_breaks = "2 weeks",
-    date_labels = "%d %b"
-  ) +
-  scale_y_continuous(
-    expand = expansion(mult = c(0, 0.05))
-  ) +
-  labs(
-    x = "Comparison midpoint",
-    y = "Number of interactions",
-    fill = "Interaction-change category"
-  ) +
-  guides(fill = guide_legend(nrow = 2, byrow = TRUE)) +
-  theme_pollobs() +
+# Set the order in which gardens will appear.
+s1_site_levels <- c(
+  "Halle",
+  "Jena",
+  "Leipzig"
+)
+
+# Retain only gardens represented in the analytical results.
+s1_site_levels <- s1_site_levels[
+  s1_site_levels %in%
+    unique(as.character(link_category_summary$Site))
+]
+
+# Use a common temporal range so that the seasonal position of the
+# comparisons is directly comparable among gardens.
+s1_midday_limits <- range(
+  link_category_summary$Mid_day,
+  na.rm = TRUE
+)
+
+# Create one vertically divided panel for each garden. Break positions and
+# labels are garden-specific because the available weekly networks differ
+# among gardens.
+s1_panels <- lapply(
+  s1_site_levels,
+  function(site_i) {
+    
+    site_transition_axis <- link_category_summary %>%
+      filter(Site == site_i) %>%
+      distinct(
+        Mid_day,
+        Transition
+      ) %>%
+      arrange(Mid_day)
+    
+    stopifnot(
+      !anyDuplicated(
+        site_transition_axis$Mid_day
+      )
+    )
+    
+    plot_link_change_pair(
+      data = link_category_summary %>%
+        filter(Site == site_i),
+      x_var = "Mid_day",
+      x_scale = scale_x_continuous(
+        limits = s1_midday_limits,
+        breaks = site_transition_axis$Mid_day,
+        labels = site_transition_axis$Transition,
+        expand = expansion(
+          mult = c(0.01, 0.01)
+        )
+      ),
+      site_label = site_i,
+      panel_tag = NULL,
+      x_title = "Weekly network comparison",
+      base_size = 14
+    )
+  }
+)
+
+# Stack the three gardens and collect their identical legends into a single
+# legend at the bottom of the figure.
+plot_link_categories_all <- patchwork::wrap_plots(
+  plotlist = s1_panels,
+  ncol = 1,
+  guides = "collect"
+) &
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1)
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.justification = "center",
+    legend.box.just = "center",
+    legend.title.position = "top",
+    legend.title = element_text(
+      size = 13
+    ),
+    legend.text = element_text(
+      size = 12
+    ),
+    legend.key.width = grid::unit(
+      0.50,
+      "cm"
+    ),
+    legend.key.height = grid::unit(
+      0.45,
+      "cm"
+    )
   )
 
-
+plot_link_categories_all
 # =============================================================================
 # 9. Supplementary figure S2: mechanism proportions through time
 # =============================================================================
@@ -934,7 +1138,7 @@ plot_node_dynamics_all <- ggplot() +
 
 
 # =============================================================================
-# 14. Supplementary figure S7: species and interaction reorganization by garden
+# 14. Supplementary figure S4: species and interaction reorganization by garden
 # =============================================================================
 
 change_colours <- c(
@@ -982,6 +1186,16 @@ species_plot_data <- node_status_summary %>%
       Change_status == "Lost",
       -n_nodes,
       n_nodes
+    ),
+    X_base = as.numeric(Guild_label),
+    X_plot = X_base + case_when(
+      Change_status == "Permanent / persistent" ~
+        species_permanent_offset,
+      Change_status == "Lost" ~
+        species_change_pair_centre - loss_gain_separation / 2,
+      Change_status == "Gained" ~
+        species_change_pair_centre + loss_gain_separation / 2,
+      TRUE ~ 0
     )
   )
 
@@ -994,6 +1208,7 @@ species_plot_summary <- species_plot_data %>%
   summarise(
     Mean = mean(Plot_value, na.rm = TRUE),
     SD = sd(Plot_value, na.rm = TRUE),
+    X_plot = first(X_plot),
     .groups = "drop"
   ) %>%
   mutate(
@@ -1001,17 +1216,12 @@ species_plot_summary <- species_plot_data %>%
     Upper = Mean + SD
   )
 
-position_species <- position_dodge(
-  width = 0.72
-)
-
 plot_species_reorganization <- ggplot(
   species_plot_summary,
   aes(
-    x = Guild_label,
+    x = X_plot,
     y = Mean,
-    fill = Change_status,
-    group = Change_status
+    fill = Change_status
   )
 ) +
   geom_hline(
@@ -1020,8 +1230,7 @@ plot_species_reorganization <- ggplot(
     colour = "grey25"
   ) +
   geom_col(
-    width = 0.65,
-    position = position_species
+    width = reorganization_bar_width
   ) +
   geom_errorbar(
     aes(
@@ -1029,15 +1238,13 @@ plot_species_reorganization <- ggplot(
       ymax = Upper
     ),
     width = 0.12,
-    linewidth = 0.65,
-    position = position_species
+    linewidth = 0.65
   ) +
   geom_point(
     data = species_plot_data,
     aes(
-      x = Guild_label,
-      y = Plot_value,
-      group = Change_status
+      x = X_plot,
+      y = Plot_value
     ),
     inherit.aes = FALSE,
     shape = 1,
@@ -1046,9 +1253,9 @@ plot_species_reorganization <- ggplot(
     colour = "grey20",
     fill = NA,
     alpha = 0.65,
-    position = position_jitterdodge(
-      jitter.width = 0.10,
-      dodge.width = 0.72,
+    position = position_jitter(
+      width = 0.045,
+      height = 0,
       seed = 24
     )
   ) +
@@ -1056,11 +1263,16 @@ plot_species_reorganization <- ggplot(
     ~ Site,
     ncol = 1
   ) +
+  scale_x_continuous(
+    breaks = seq_along(levels(species_plot_data$Guild_label)),
+    labels = levels(species_plot_data$Guild_label),
+    expand = expansion(mult = c(0.12, 0.12))
+  ) +
   scale_fill_manual(
     values = change_colours,
     breaks = change_levels,
     labels = c(
-      "Permanent / persistent" = "Permanent",
+      "Permanent / persistent" = "Persistent",
       "Gained" = "Gained",
       "Lost" = "Lost"
     ),
@@ -1165,6 +1377,14 @@ interaction_plot_data <- link_category_summary %>%
       Change_status == "Lost",
       -n_links,
       n_links
+    ),
+    X_base = as.numeric(Mechanism_group),
+    X_plot = X_base + case_when(
+      Change_status == "Lost" ~
+        -loss_gain_separation / 2,
+      Change_status == "Gained" ~
+        loss_gain_separation / 2,
+      TRUE ~ 0
     )
   )
 
@@ -1183,6 +1403,7 @@ interaction_plot_summary <- interaction_plot_data %>%
   summarise(
     Mean = mean(Plot_value, na.rm = TRUE),
     SD = sd(Plot_value, na.rm = TRUE),
+    X_plot = first(X_plot),
     .groups = "drop"
   ) %>%
   mutate(
@@ -1190,17 +1411,12 @@ interaction_plot_summary <- interaction_plot_data %>%
     Upper = Mean + SD
   )
 
-position_interactions <- position_dodge(
-  width = 0.72
-)
-
 plot_interaction_reorganization <- ggplot(
   interaction_plot_summary,
   aes(
-    x = Mechanism_group,
+    x = X_plot,
     y = Mean,
-    fill = Category,
-    group = Change_status
+    fill = Category
   )
 ) +
   geom_hline(
@@ -1209,8 +1425,7 @@ plot_interaction_reorganization <- ggplot(
     colour = "grey25"
   ) +
   geom_col(
-    width = 0.65,
-    position = position_interactions
+    width = reorganization_bar_width
   ) +
   geom_errorbar(
     aes(
@@ -1218,15 +1433,13 @@ plot_interaction_reorganization <- ggplot(
       ymax = Upper
     ),
     width = 0.12,
-    linewidth = 0.65,
-    position = position_interactions
+    linewidth = 0.65
   ) +
   geom_point(
     data = interaction_plot_data,
     aes(
-      x = Mechanism_group,
-      y = Plot_value,
-      group = Change_status
+      x = X_plot,
+      y = Plot_value
     ),
     inherit.aes = FALSE,
     shape = 1,
@@ -1235,15 +1448,20 @@ plot_interaction_reorganization <- ggplot(
     colour = "grey20",
     fill = NA,
     alpha = 0.65,
-    position = position_jitterdodge(
-      jitter.width = 0.10,
-      dodge.width = 0.72,
+    position = position_jitter(
+      width = 0.045,
+      height = 0,
       seed = 24
     )
   ) +
   facet_wrap(
     ~ Site,
     ncol = 1
+  ) +
+  scale_x_continuous(
+    breaks = seq_along(levels(interaction_plot_data$Mechanism_group)),
+    labels = levels(interaction_plot_data$Mechanism_group),
+    expand = expansion(mult = c(0.08, 0.08))
   ) +
   scale_fill_manual(
     values = category_colours,
@@ -1334,11 +1552,12 @@ save_plot_both(
 )
 
 save_plot_both(
-  plot_link_categories_all,
-  "Figure_S1_link_change_categories_all_gardens",
+  plot = plot_link_categories_all,
+  filename = "Figure_S1_link_change_categories_all_gardens",
   directory = supplementary_dir,
-  width = 13,
-  height = 8
+  width = 14,
+  height = 15,
+  dpi = 600
 )
 
 save_plot_both(

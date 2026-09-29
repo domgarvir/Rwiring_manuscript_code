@@ -228,7 +228,7 @@ legend_breaks <- c(
 )
 
 legend_labels <- c(
-  "Persistent",
+  "Permanent",
   "Lost: rewiring",
   "Lost: one transient species",
   "Lost: two transient species",
@@ -589,7 +589,7 @@ main_panel_B <- ggplot(
     values = change_colours,
     breaks = change_levels,
     labels = c(
-      "Permanent / persistent" = "Persistent",
+      "Permanent / persistent" = "Permanent",
       "Lost" = "Lost",
       "Gained" = "Gained"
     ),
@@ -684,7 +684,8 @@ main_panel_C <- ggplot(
   ) +
   scale_x_continuous(
     breaks = seq_along(levels(halle_interaction_data$Mechanism_group)),
-    labels = levels(halle_interaction_data$Mechanism_group),
+    labels = c("Permanent", "Rewiring",
+               "One transient\nspecies", "Two transient\nspecies"),
     expand = expansion(mult = c(0.08, 0.08))
   ) +
   scale_fill_manual(
@@ -1272,7 +1273,7 @@ plot_species_reorganization <- ggplot(
     values = change_colours,
     breaks = change_levels,
     labels = c(
-      "Permanent / persistent" = "Persistent",
+      "Permanent / persistent" = "Permanent",
       "Gained" = "Gained",
       "Lost" = "Lost"
     ),
@@ -1460,12 +1461,22 @@ plot_interaction_reorganization <- ggplot(
   ) +
   scale_x_continuous(
     breaks = seq_along(levels(interaction_plot_data$Mechanism_group)),
-    labels = levels(interaction_plot_data$Mechanism_group),
+    labels = c("Permanent", "Rewiring",
+               "One transient\nspecies", "Two transient\nspecies"),
     expand = expansion(mult = c(0.08, 0.08))
   ) +
   scale_fill_manual(
     values = category_colours,
     breaks = category_levels,
+    labels = c(
+      "Permanent",
+      "Lost: rewiring",
+      "Lost: one transient species",
+      "Lost: two transient species",
+      "Gained: rewiring",
+      "Gained: one transient species",
+      "Gained: two transient species"
+    ),
     drop = FALSE,
     name = "Interaction-change category"
   ) +

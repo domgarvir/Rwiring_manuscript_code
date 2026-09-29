@@ -12,200 +12,6 @@ def distance(x_t1, x_t2, method="euclidean"):
     # Return the first distance value
     return y[0]
 
-#quantifying changes in interactions from year to year
-def rewiring_py_new(A, B, quantitative=False, method="euclidean"):
-    A_bin = (A != 0).astype(int)
-    B_bin = (B != 0).astype(int)
-
-    if not quantitative:
-        A = A_bin
-        B = B_bin
-
-    common_col = A.columns.intersection(B.columns)
-    common_row = A.index.intersection(B.index)
-
-    # --- NEW: species exclusive to each network (needed for LBN / GBN) ---
-    rows_only_A = A.index.difference(common_row)     # plants lost from t1 -> t2
-    cols_only_A = A.columns.difference(common_col)   # pollinators lost
-    rows_only_B = B.index.difference(common_row)     # plants gained
-    cols_only_B = B.columns.difference(common_col)   # pollinators gained
-
-    CN1 = A.loc[common_row, common_col]
-    CN2 = B.loc[common_row, common_col]
-
-    CN1_bin = A_bin.loc[common_row, common_col]
-    CN2_bin = B_bin.loc[common_row, common_col]
-
-    index_CN_SI = np.argwhere((CN1.values > 0) & (CN2.values > 0))
-    index_CN_SNI = np.argwhere((CN1.values == 0) & (CN1.values == CN2.values))
-    index_CN_LI = np.argwhere((CN1.values > 0) & (CN2.values == 0))
-    index_CN_GI = np.argwhere((CN1.values == 0) & (CN2.values > 0))
-
-    CN_SI = len(index_CN_SI)
-    CN_SNI = len(index_CN_SNI)
-    CN_LI = len(index_CN_LI)
-    CN_GI = len(index_CN_GI)
-
-    if CN_SI > 0:
-        d_q_CN_SI = distance(CN1.values[index_CN_SI[:, 0], index_CN_SI[:, 1]], CN2.values[index_CN_SI[:, 0], index_CN_SI[:, 1]], method=method)
-        d_B_CN_SI = distance(CN1_bin.values[index_CN_SI[:, 0], index_CN_SI[:, 1]], CN2_bin.values[index_CN_SI[:, 0], index_CN_SI[:, 1]], method=method)
-        W_CN_SI = (1 + d_q_CN_SI) / (1 + d_B_CN_SI)
-    else:
-        W_CN_SI = 1
-
-    if CN_SNI > 0:
-        d_q_CN_SNI = distance(CN1.values[index_CN_SNI[:, 0], index_CN_SNI[:, 1]], CN2.values[index_CN_SNI[:, 0], index_CN_SNI[:, 1]], method=method)
-        d_B_CN_SNI = distance(CN1.values[index_CN_SNI[:, 0], index_CN_SNI[:, 1]], CN2.values[index_CN_SNI[:, 0], index_CN_SNI[:, 1]], method=method)
-        W_CN_SNI = (1 + d_q_CN_SNI) / (1 + d_B_CN_SNI)
-    else:
-        W_CN_SNI = 1
-
-    if CN_LI > 0:
-        d_q_CN_LI = distance(CN1.values[index_CN_LI[:, 0], index_CN_LI[:, 1]], CN2.values[index_CN_LI[:, 0], index_CN_LI[:, 1]], method=method)
-        d_B_CN_LI = distance(CN1_bin.values[index_CN_LI[:, 0], index_CN_LI[:, 1]], CN2_bin.values[index_CN_LI[:, 0], index_CN_LI[:, 1]], method=method)
-        W_CN_LI = (1 + d_q_CN_LI) / (1 + d_B_CN_LI)
-    else:
-        W_CN_LI = 1
-
-    if CN_GI > 0:
-        d_q_CN_GI = distance(CN1.values[index_CN_GI[:, 0], index_CN_GI[:, 1]], CN2.values[index_CN_GI[:, 0], index_CN_GI[:, 1]], method=method)
-        d_B_CN_GI = distance(CN1_bin.values[index_CN_GI[:, 0], index_CN_GI[:, 1]], CN2_bin.values[index_CN_GI[:, 0], index_CN_GI[:, 1]], method=method)
-        W_CN_GI = (1 + d_q_CN_GI) / (1 + d_B_CN_GI)
-    else:
-        W_CN_GI = 1
-
-    # --- LN: interactions lost where only ONE of the two species leaves ---
-    LN = A.copy()
-    LN.loc[common_row, common_col] = np.nan          # hide core cells (CN_*)
-    LN.loc[rows_only_A, cols_only_A] = np.nan        # NEW: hide "both species lost" cells (-> LBN)
-
-    index_L1N_LI = np.argwhere((LN.values > 0) & ~np.isnan(LN.values))
-    index_LN_SNI = np.argwhere((LN.values == 0) & ~np.isnan(LN.values))
-
-    L1N_LI = len(index_L1N_LI)   # lose ONE node -> lost interactions
-    LN_SNI = len(index_LN_SNI)
-
-    LN_bin = LN.copy()
-    LN_bin[(LN_bin != 0) & ~LN_bin.isna()] = 1
-
-    W_LN_SNI = 1
-
-    if L1N_LI > 0:
-        d_q_L1N_LI = distance(LN.values[index_L1N_LI[:, 0], index_L1N_LI[:, 1]], 0 * LN.values[index_L1N_LI[:, 0], index_L1N_LI[:, 1]], method=method)
-        d_B_L1N_LI = distance(LN_bin.values[index_L1N_LI[:, 0], index_L1N_LI[:, 1]], 0 * LN_bin.values[index_L1N_LI[:, 0], index_L1N_LI[:, 1]], method=method)
-        W_L1N_LI = (1 + d_q_L1N_LI) / (1 + d_B_L1N_LI)
-    else:
-        W_L1N_LI = 1
-
-    # --- NEW: LBN: interactions lost because BOTH species leave ---
-    LBN = A.loc[rows_only_A, cols_only_A]
-    LBN_bin = A_bin.loc[rows_only_A, cols_only_A]
-
-    index_LBN_LI = np.argwhere(LBN.values > 0)
-    index_LBN_SNI = np.argwhere(LBN.values == 0)
-
-    LBN_LI = len(index_LBN_LI)
-    LBN_SNI = len(index_LBN_SNI)
-
-    W_LBN_SNI = 1
-
-    if LBN_LI > 0:
-        d_q_LBN_LI = distance(LBN.values[index_LBN_LI[:, 0], index_LBN_LI[:, 1]], 0 * LBN.values[index_LBN_LI[:, 0], index_LBN_LI[:, 1]], method=method)
-        d_B_LBN_LI = distance(LBN_bin.values[index_LBN_LI[:, 0], index_LBN_LI[:, 1]], 0 * LBN_bin.values[index_LBN_LI[:, 0], index_LBN_LI[:, 1]], method=method)
-        W_LBN_LI = (1 + d_q_LBN_LI) / (1 + d_B_LBN_LI)
-    else:
-        W_LBN_LI = 1
-
-    # --- GN: interactions gained where only ONE of the two species is new ---
-    GN = B.copy()
-    GN.loc[common_row, common_col] = np.nan          # hide core cells (CN_*)
-    GN.loc[rows_only_B, cols_only_B] = np.nan        # NEW: hide "both species gained" cells (-> GBN)
-
-    index_G1N_GI = np.argwhere((GN.values > 0) & ~np.isnan(GN.values))
-    index_GN_SNI = np.argwhere((GN.values == 0) & ~np.isnan(GN.values))
-
-    G1N_GI = len(index_G1N_GI)   # gain ONE node -> gained interactions
-    GN_SNI = len(index_GN_SNI)
-
-    GN_bin = GN.copy()
-    GN_bin[(GN_bin != 0) & ~GN_bin.isna()] = 1
-
-    if G1N_GI > 0:
-        d_q_G1N_GI = distance(0 * GN.values[index_G1N_GI[:, 0], index_G1N_GI[:, 1]], GN.values[index_G1N_GI[:, 0], index_G1N_GI[:, 1]], method=method)
-        d_B_G1N_GI = distance(0 * GN_bin.values[index_G1N_GI[:, 0], index_G1N_GI[:, 1]], GN_bin.values[index_G1N_GI[:, 0], index_G1N_GI[:, 1]], method=method)
-        W_G1N_GI = (1 + d_q_G1N_GI) / (1 + d_B_G1N_GI)
-    else:
-        W_G1N_GI = 1
-
-    W_GN_SNI = 1
-
-    # --- NEW: GBN: interactions gained because BOTH species are new ---
-    GBN = B.loc[rows_only_B, cols_only_B]
-    GBN_bin = B_bin.loc[rows_only_B, cols_only_B]
-
-    index_GBN_GI = np.argwhere(GBN.values > 0)
-    index_GBN_SNI = np.argwhere(GBN.values == 0)
-
-    GBN_GI = len(index_GBN_GI)
-    GBN_SNI = len(index_GBN_SNI)
-
-    W_GBN_SNI = 1
-
-    if GBN_GI > 0:
-        d_q_GBN_GI = distance(0 * GBN.values[index_GBN_GI[:, 0], index_GBN_GI[:, 1]], GBN.values[index_GBN_GI[:, 0], index_GBN_GI[:, 1]], method=method)
-        d_B_GBN_GI = distance(0 * GBN_bin.values[index_GBN_GI[:, 0], index_GBN_GI[:, 1]], GBN_bin.values[index_GBN_GI[:, 0], index_GBN_GI[:, 1]], method=method)
-        W_GBN_GI = (1 + d_q_GBN_GI) / (1 + d_B_GBN_GI)
-    else:
-        W_GBN_GI = 1
-
-    # --- atomic categories: every network cell falls into exactly ONE of these ---
-    atomic_metrics = ["CN_LI", "L1N_LI", "LBN_LI", "CN_GI", "G1N_GI", "GBN_GI",
-                       "CN_SI", "CN_SNI", "LN_SNI", "GN_SNI"]
-    atomic_values = [CN_LI, L1N_LI, LBN_LI, CN_GI, G1N_GI, GBN_GI,
-                      CN_SI, CN_SNI, LN_SNI, GN_SNI]
-    atomic_weights = [W_CN_LI, W_L1N_LI, W_LBN_LI, W_CN_GI, W_G1N_GI, W_GBN_GI,
-                       W_CN_SI, W_CN_SNI, W_LN_SNI, W_GN_SNI]
-    atomic_values_weighted = [v * w for v, w in zip(atomic_values, atomic_weights)]
-
-    # total_links / total_weighted are computed from atomic categories ONLY,
-    # so every cell of A and B is counted exactly once
-    total_links = sum(atomic_values)
-    total_weighted = sum(atomic_values_weighted)
-
-    # --- derived totals: LN_LI = L1N_LI + LBN_LI ; GN_GI = G1N_GI + GBN_GI ---
-    # these are convenience rows, NOT included in total_links/total_weighted
-    # (their cells are already counted in the atomic rows above)
-    LN_LI = L1N_LI + LBN_LI
-    LN_LI_weighted = (L1N_LI * W_L1N_LI) + (LBN_LI * W_LBN_LI)
-    W_LN_LI = LN_LI_weighted / LN_LI if LN_LI > 0 else 1
-
-    GN_GI = G1N_GI + GBN_GI
-    GN_GI_weighted = (G1N_GI * W_G1N_GI) + (GBN_GI * W_GBN_GI)
-    W_GN_GI = GN_GI_weighted / GN_GI if GN_GI > 0 else 1
-
-    derived_metrics = ["LN_LI", "GN_GI"]
-    derived_values = [LN_LI, GN_GI]
-    derived_weights = [W_LN_LI, W_GN_GI]
-    derived_values_weighted = [LN_LI_weighted, GN_GI_weighted]
-
-    metrics = atomic_metrics + derived_metrics
-    values = atomic_values + derived_values
-    weights = atomic_weights + derived_weights
-    values_weighted = atomic_values_weighted + derived_values_weighted
-    is_total = [False] * len(atomic_metrics) + [True] * len(derived_metrics)
-
-    result = pd.DataFrame({
-        'metric': metrics,
-        'value': values,
-        'weight': weights,
-        'value_weighted': values_weighted,
-        'is_derived_total': is_total,
-        'total_links': [total_links] * len(metrics),
-        'total_weighted': [total_weighted] * len(metrics)
-    })
-
-    return result
-
 def rewiring_freq_py(A, B):
     """
     Cuantifica el cambio entre dos redes (A=t1, B=t2) usando la SUMA de frecuencias
@@ -377,4 +183,24 @@ def rewiring_freq_py(A, B):
         'freq_sum': freq_sum,
     })
 
-    return result
+    # ------------------------------------------------------------------
+    # NUEVO -- segunda tabla: conteo de nodos (especies) permanentes/exclusivos.
+    # columnas = polinizadores, index = plantas (convencion de toda la funcion).
+    # ------------------------------------------------------------------
+    node_metrics = ["PA", "PP", "A1", "P1", "A2", "P2"]
+    node_counts_values = [
+        len(common_col),   # PA: polinizadores permanentes
+        len(common_row),   # PP: plantas permanentes
+        len(cols_only_A),  # A1: polinizadores exclusivos de t1
+        len(rows_only_A),  # P1: plantas exclusivas de t1
+        len(cols_only_B),  # A2: polinizadores exclusivos de t2
+        len(rows_only_B),  # P2: plantas exclusivas de t2
+    ]
+ 
+    node_counts = pd.DataFrame({
+        'metric': node_metrics,
+        'n_species': node_counts_values,
+    })
+
+
+    return result, node_counts

@@ -1,6 +1,7 @@
 from Functions import *
 from Rewiring_functions import *
 
+
 Ilist=read_database()
 
 #create annual networks in each site
@@ -19,11 +20,24 @@ year=Years[4]
 web1=networks[site][year]
 web2=networks[site][year+1]
 
-#quantify changes
-Changes_df=rewiring_new_py(web1,web2)
+
 
 web_t1=web1
 web_t2=web2
+
+B3,B4,beta_dict2=get_betadiversity_network_by_year(networks[site][year+1],networks[site][year+2])#16-17
+
+ncol=2
+nrow=1
+plt.rcParams.update({'font.size': 25})
+fig, axs = plt.subplots(nrow, ncol,figsize=(7*ncol,4.5*nrow),sharey=True)#row
+plot_bipartite_network_to_ax(B3,draw_labels=False,node_cathegories=beta_dict2,w=1,h=0.3,buffer=8,lw=1.2,ax=axs[0])
+
+
+
+
+
+
 
 fig, ax = plt.subplots(figsize=(12, 8))
 

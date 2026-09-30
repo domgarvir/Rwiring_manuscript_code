@@ -7,7 +7,8 @@ library(maps) #to plot on map
 library(geosphere) #to compute distance between coords
 
 # load data
-data = readRDS("Data/3_Final_data/Interaction_data.rds")
+data = readRDS("DATA/Clough/clough_data.rds")
+data 
 
 # select study of interest
 clough_data = data %>% 

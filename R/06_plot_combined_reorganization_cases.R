@@ -77,10 +77,16 @@ theme_combined <- function(base_size = 16) {
         face = "plain",
         size = 16
       ),
-      axis.title.x = element_text(
-        size = 16,
-        margin = margin(t = 10)
+      
+      # Frame around every data panel
+      panel.border = element_rect(
+        colour = "grey45",
+        fill = NA,
+        linewidth = 0.6
       ),
+      axis.line = element_blank(),
+      
+      axis.title.x = element_blank(),
       axis.title.y = element_text(
         face = "plain",
         size = 18,
@@ -93,10 +99,6 @@ theme_combined <- function(base_size = 16) {
       axis.text.y = element_text(
         size = 15,
         colour = "black"
-      ),
-      axis.line = element_line(
-        colour = "grey45",
-        linewidth = 0.6
       ),
       axis.ticks = element_line(
         colour = "grey45",
@@ -114,30 +116,12 @@ theme_combined <- function(base_size = 16) {
       legend.direction = "horizontal",
       legend.justification = "center",
       legend.box.just = "center",
-      legend.title = element_text(
-        size = 15
-      ),
-      legend.text = element_text(
-        size = 14
-      ),
-      legend.key.width = grid::unit(
-        0.72,
-        "cm"
-      ),
-      legend.key.height = grid::unit(
-        0.50,
-        "cm"
-      ),
-      legend.spacing.x = grid::unit(
-        0.20,
-        "cm"
-      ),
-      plot.margin = margin(
-        6,
-        6,
-        6,
-        6
-      )
+      legend.title = element_text(size = 15),
+      legend.text = element_text(size = 14),
+      legend.key.width = grid::unit(0.72, "cm"),
+      legend.key.height = grid::unit(0.50, "cm"),
+      legend.spacing.x = grid::unit(0.20, "cm"),
+      plot.margin = margin(6, 6, 6, 6)
     )
 }
 

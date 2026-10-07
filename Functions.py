@@ -14,8 +14,12 @@ from matplotlib.collections import PatchCollection
 from matplotlib.patches     import Rectangle
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
+from matplotlib.patches import Rectangle
+from matplotlib.collections import PatchCollection
 
 from scipy import stats
+from scipy.stats import spearmanr
+
 import copy
 import networkx.algorithms.community as nx_comm
 
@@ -26,7 +30,7 @@ Sites=['aznalcazar','bonares','convento de la luz','el pozo','esparragal','la cu
 
 
 def read_database():
-    filename="./DATA/Ilist_byyear.csv" 
+    filename="./DATA/Beefun/Ilist_byyear.csv" 
     
     Ilist=pd.read_csv(filename,index_col=0)
     Ilist.set_index(["Site_ID", "Year"],inplace=True)
@@ -160,17 +164,41 @@ def plot_network_matrix_to_ax(web, ax=None, order=None, cmap="Blues",
 
     return ax, (ordered_rows, ordered_cols)
 #----------------
-def plot_betadiversity_Wmatrix_to_ax(web_t1, web_t2, ax=None, order=None, overlap=None,
-                                      weighted=True, min_alpha=0.15, vmax=None,
-                                      marker_size=35, marker_color="#1a1a1a",
-                                      names=False, fontsize=8):
+
+def plot_betadiversity_Wmatrix_to_ax3(web_t1, web_t2, ax=None, order=None, overlap=None,
+                                       weighted=True, min_alpha=0.15, vmax=None,
+                                       marker_size=35, marker_color="#1a1a1a",
+                                       names=False, fontsize=8):
     """
-    Plotea la matriz plantas x polinizadores comparando dos redes (t1, t2).
+    Plotea la matriz plantas x polinizadores comparando dos redes (t1, t2),
+    usando las 9 categorías de cambio de link:
+
+      Permanentes (siempre verde, se distinguen con el triángulo):
+        0 - estable            (sin triángulo)
+        1 - aumenta frecuencia (triángulo blanco hacia arriba)
+        2 - disminuye frecuencia (triángulo blanco hacia abajo)
+
+      Ganadas (solo en t2), según nº de especies "transitorias" implicadas:
+        3 - rewiring      (planta y polinizador ya estaban en t1)
+        4 - 1 transitoria (una de las dos especies es nueva en t2)
+        5 - 2 transitorias (planta y polinizador son ambos nuevos en t2)
+
+      Perdidas (solo en t1), según nº de especies "transitorias" implicadas:
+        6 - rewiring      (planta y polinizador siguen presentes en t2)
+        7 - 1 transitoria (una de las dos especies desaparece)
+        8 - 2 transitorias (planta y polinizador desaparecen ambos)
+
+    Las celdas se dibujan como rectangulos VECTORIALES (no como imagen), para
+    que sean editables en Inkscape y salgan bien en el PDF.
 
     El ORDEN de especies se calcula con _joint_order_binary (unica fuente de verdad) --
     la MISMA que usa plot_networks_separately_matched_order, para que ambas figuras
     coincidan siempre.
     """
+    # copia de los datos originales (con frecuencia) ANTES de binarizar,
+    # para que el triangulo de permanentes refleje siempre el cambio real
+    web_t1_raw, web_t2_raw = web_t1, web_t2
+
     if not weighted:
         web_t1 = (web_t1 != 0).astype(int)
         web_t2 = (web_t2 != 0).astype(int)
@@ -230,8 +258,9 @@ def plot_betadiversity_Wmatrix_to_ax(web_t1, web_t2, ax=None, order=None, overla
     weight_web = web_t1.reindex(index=core_cat.index, columns=core_cat.columns).fillna(0) \
         + web_t2.reindex(index=core_cat.index, columns=core_cat.columns).fillna(0)
 
-    diff_web = web_t2.reindex(index=core_cat.index, columns=core_cat.columns).fillna(0) \
-        - web_t1.reindex(index=core_cat.index, columns=core_cat.columns).fillna(0)
+    # diff con los datos ORIGINALES (frecuencia real), aunque weighted=False
+    diff_web = web_t2_raw.reindex(index=core_cat.index, columns=core_cat.columns).fillna(0) \
+        - web_t1_raw.reindex(index=core_cat.index, columns=core_cat.columns).fillna(0)
 
     # ------------------------------------------------------------------
     # 3) ORDEN de especies -- delegado a _joint_order_binary (UNICA fuente de verdad)
@@ -242,10 +271,13 @@ def plot_betadiversity_Wmatrix_to_ax(web_t1, web_t2, ax=None, order=None, overla
         ordered_plants = order[0]
         ordered_pollis = order[1]
 
+    # ------------------------------------------------------------------
+    # 4) PALETA: 9 categorías de cambio de link
+    # ------------------------------------------------------------------
+    colors = ('#009455', '#009455', '#009455',   # permanente: estable, aumenta, disminuye
+              '#E69F00', '#F1CA72', '#F9E9C6',   # ganada: rewiring, 1 transitoria, 2 transitorias
+              '#0072B2', '#72B1D4', '#C6DFEE')   # perdida: rewiring, 1 transitoria, 2 transitorias
     c_grey = '#d7d7d6'
-    c_blue = '#0072B2'
-    c_yellow = '#E69F00'
-    c_green = '#009455'
 
     if overlap is not None:
         over_ordered = overlap.reindex(index=ordered_plants, columns=ordered_pollis).replace(0, np.nan)
@@ -262,45 +294,79 @@ def plot_betadiversity_Wmatrix_to_ax(web_t1, web_t2, ax=None, order=None, overla
         n_rows, n_cols = cat_vals.shape
         rgba = np.zeros((n_rows, n_cols, 4))
 
-        mask_green = cat_vals == 3
-        mask_blue = cat_vals == 1
-        mask_yellow = cat_vals == 2
+        mask_perm = cat_vals == 3
+        mask_lost = cat_vals == 1
+        mask_gain = cat_vals == 2
+        mask_grey = cat_vals == -1
 
-        green_mag = np.abs(diff_vals[mask_green]) if mask_green.any() else np.array([])
-        blue_mag = w_vals[mask_blue] if mask_blue.any() else np.array([])
-        yellow_mag = w_vals[mask_yellow] if mask_yellow.any() else np.array([])
+        # --- nº de especies "transitorias" implicadas en cada celda ganada/perdida ---
+        plant_is_new  = np.array([p in plants_y2 for p in ordered_plants])[:, None]
+        polli_is_new  = np.array([a in pollis_y2 for a in ordered_pollis])[None, :]
+        plant_is_lost = np.array([p in plants_y1 for p in ordered_plants])[:, None]
+        polli_is_lost = np.array([a in pollis_y1 for a in ordered_pollis])[None, :]
+
+        n_transient_gain = plant_is_new.astype(int) + polli_is_new.astype(int)
+        n_transient_lost = plant_is_lost.astype(int) + polli_is_lost.astype(int)
+
+        mask_gain_rewire = mask_gain & (n_transient_gain == 0)
+        mask_gain_1t     = mask_gain & (n_transient_gain == 1)
+        mask_gain_2t     = mask_gain & (n_transient_gain == 2)
+
+        mask_lost_rewire = mask_lost & (n_transient_lost == 0)
+        mask_lost_1t     = mask_lost & (n_transient_lost == 1)
+        mask_lost_2t     = mask_lost & (n_transient_lost == 2)
+
+        # --- indice de categoria (0-8) por celda, segun la paleta `colors` ---
+        subcat = np.full(cat_vals.shape, -1, dtype=int)
+        subcat[mask_perm & (diff_vals == 0)] = 0
+        subcat[mask_perm & (diff_vals > 0)]  = 1
+        subcat[mask_perm & (diff_vals < 0)]  = 2
+        subcat[mask_gain_rewire] = 3
+        subcat[mask_gain_1t]     = 4
+        subcat[mask_gain_2t]     = 5
+        subcat[mask_lost_rewire] = 6
+        subcat[mask_lost_1t]     = 7
+        subcat[mask_lost_2t]     = 8
+
+        color_rgb = np.array([_hex_to_rgb(c) for c in colors])
+        valid = subcat >= 0
+        rgba[valid, 0:3] = color_rgb[subcat[valid]]
+        rgba[mask_grey, 0:3] = _hex_to_rgb(c_grey)
+        rgba[mask_grey, 3] = 1.0
+
+        # --- magnitud para la transparencia: |diff| en permanentes, peso total en gain/lost ---
+        mag = np.zeros(cat_vals.shape)
+        mag[mask_perm] = np.abs(diff_vals[mask_perm])
+        for m in (mask_gain_rewire, mask_gain_1t, mask_gain_2t,
+                  mask_lost_rewire, mask_lost_1t, mask_lost_2t):
+            mag[m] = w_vals[m]
 
         if not weighted:
-            alpha_fn = lambda mag: np.ones_like(mag, dtype=float)
-        elif vmax is not None:
-            shared_vmax = vmax
-            alpha_fn = lambda mag: _weight_to_alpha(mag, shared_vmax, min_alpha=min_alpha)
+            alpha = np.ones(cat_vals.shape, dtype=float)
         else:
-            all_mags = np.concatenate([green_mag, blue_mag, yellow_mag])
-            shared_vmax = np.nanmax(all_mags) if all_mags.size > 0 and np.nanmax(all_mags) > 0 else 1
-            alpha_fn = lambda mag: _weight_to_alpha(mag, shared_vmax, min_alpha=min_alpha)
+            shared_vmax = vmax if vmax is not None else (
+                np.nanmax(mag[valid]) if valid.any() and np.nanmax(mag[valid]) > 0 else 1
+            )
+            alpha = _weight_to_alpha(mag, shared_vmax, min_alpha=min_alpha)
 
-        mask = cat_vals == -1
-        rgba[mask, 0:3] = _hex_to_rgb(c_grey)
-        rgba[mask, 3] = 1.0
+        rgba[valid, 3] = alpha[valid]
 
-        if mask_green.any():
-            rgba[mask_green, 0:3] = _hex_to_rgb(c_green)
-            rgba[mask_green, 3] = alpha_fn(green_mag)
+        # --- celdas como rectangulos VECTORIALES (editables en Inkscape) ---
+        rects, face = [], []
+        for i in range(n_rows):
+            for j in range(n_cols):
+                if rgba[i, j, 3] > 0:                      # salta celdas vacias
+                    rects.append(Rectangle((j - 0.5, i - 0.5), 1, 1))
+                    face.append(rgba[i, j])
+        cax = ax.add_collection(PatchCollection(rects, facecolors=face,
+                                                edgecolors='none', linewidths=0))
+        ax.set_xlim(-0.5, n_cols - 0.5)
+        ax.set_ylim(n_rows - 0.5, -0.5)                    # misma orientacion que imshow
+        ax.set_aspect('equal')
 
-        if mask_blue.any():
-            rgba[mask_blue, 0:3] = _hex_to_rgb(c_blue)
-            rgba[mask_blue, 3] = alpha_fn(blue_mag)
-
-        if mask_yellow.any():
-            rgba[mask_yellow, 0:3] = _hex_to_rgb(c_yellow)
-            rgba[mask_yellow, 3] = alpha_fn(yellow_mag)
-
-        cax = ax.imshow(rgba)
-
-        marker_edgecolor = "white"
-        rows_idx, cols_idx = np.where(mask_green)
-        changes = diff_vals[mask_green]
+        # --- triangulos blancos en permanentes: arriba = aumenta, abajo = disminuye ---
+        rows_idx, cols_idx = np.where(mask_perm)
+        changes = diff_vals[mask_perm]
         nonzero = changes != 0
         if nonzero.any():
             up = changes[nonzero] > 0
@@ -309,12 +375,12 @@ def plot_betadiversity_Wmatrix_to_ax(web_t1, web_t2, ax=None, order=None, overla
             c_nz = cols_idx[nonzero]
             if up.any():
                 ax.scatter(c_nz[up], r_nz[up], marker='^', s=marker_size,
-                           c=c_yellow, edgecolors=marker_edgecolor, linewidths=0.8, zorder=5)
+                           c="white", edgecolors=marker_color, linewidths=0.8, zorder=5)
             if down.any():
                 ax.scatter(c_nz[down], r_nz[down], marker='v', s=marker_size,
-                           c=c_blue, edgecolors=marker_edgecolor, linewidths=0.8, zorder=5)
+                           c="white", edgecolors=marker_color, linewidths=0.8, zorder=5)
 
-    c0, c1, c2 = c_green, c_blue, c_yellow
+    c0, c1, c2 = colors[0], colors[6], colors[3]
     ax.axvline(len(common_pollis) - 0.5, color=c0, linestyle='--')
     ax.axvline(len(common_pollis) - 0.4, color=c1, linestyle='--')
     ax.axvline(len(common_pollis) + len(pollis_y1) - 0.5, color=c1, linestyle='--')
@@ -672,7 +738,8 @@ def plot_bipartite_Wnetwork_to_ax(B, draw_labels=False, node_cathegories=None,
                                    height=2, w=2, edgecolor="None", h=0.4, buffer=4,
                                    lw=1.2, ax=None, colored=True,
                                    edge_color="#0072B2", edge_color_common="#009455",
-                                   min_alpha=0.15, vmax=None, lw_range=None):
+                                   min_alpha=0.15, vmax=None, lw_range=None,
+                                   weighted=True, alpha_fixed=1.0):
     """
     Dibuja UN panel = UN grafo (B3 o B4, uno cada vez -- paneles separados por año).
 
@@ -686,16 +753,24 @@ def plot_bipartite_Wnetwork_to_ax(B, draw_labels=False, node_cathegories=None,
 
     Color de las aristas: 'common' (persistente, tambien en el otro año) ->
     edge_color_common (verde); 'y1'/'y2' (exclusiva de este año) -> edge_color
-    (el que pases en la llamada). La intensidad (alpha) y el grosor (si pasas
-    lw_range) se calculan a partir del peso REAL de cada arista en ESTE grafo
-    -- ya no se usa el peso para decidir el color, solo la categoria.
+    (el que pases en la llamada).
+
+    weighted=True : la intensidad (alpha) y el grosor (si pasas lw_range) se
+                    calculan a partir del peso REAL de cada arista.
+    weighted=False: todas las aristas con la misma opacidad (alpha_fixed) y
+                    el mismo grosor (lw).
     """
     if colored:
         node_color_dict = {'common': '#009455', 'y1': '#0072B2', 'y2': '#E69F00'}
     else:
-        node_color_dict = {'common': '#535353', 'y1': '#949494', 'y2': '#949494'}
+        node_color_dict = {'common': '#535353', 'y1': '#535353', 'y2': '#535353'} #'y1': '#949494', 'y2': '#949494'
 
-    edge_color_dict = {'common': edge_color_common, 'y1': edge_color, 'y2': edge_color}
+    #edge_color_dict = {'common': edge_color_common, 'y1': edge_color, 'y2': edge_color}
+
+    if colored:
+        edge_color_dict = {'common': edge_color_common, 'y1': edge_color, 'y2': edge_color}
+    else:
+        edge_color_dict = {'common': '#535353', 'y1': '#535353', 'y2': '#535353'}
 
     plants = [n for n, d in B.nodes(data=True) if d['bipartite'] == 'Plant']
     pollinators = [n for n, d in B.nodes(data=True) if d['bipartite'] == 'Pollinator']
@@ -723,7 +798,8 @@ def plot_bipartite_Wnetwork_to_ax(B, draw_labels=False, node_cathegories=None,
 
     # ------------------------------------------------------------------
     # ARISTAS -- bucle por categoria (verde primero, luego el color propio
-    # encima), intensidad/grosor segun el PESO REAL, no segun la categoria.
+    # encima). Si weighted=True, intensidad/grosor segun el PESO REAL;
+    # si weighted=False, todas iguales.
     # ------------------------------------------------------------------
     weights = [d['weight'] for u, v, d in B.edges(data=True)]
     vmax_eff = vmax if vmax is not None else (max(weights) if weights else 1)
@@ -739,9 +815,13 @@ def plot_bipartite_Wnetwork_to_ax(B, draw_labels=False, node_cathegories=None,
         for u, v, wgt in sorted(edges, key=lambda e: e[2]):
             x1, y1_ = pos[u]
             x2, y2_ = pos[v]
-            frac = np.clip(wgt / vmax_eff, 0, 1) if vmax_eff > 0 else 1
-            alpha = min_alpha + frac * (1 - min_alpha)
-            lwi = lw if lw_range is None else lw_range[0] + frac * (lw_range[1] - lw_range[0])
+            if weighted:
+                frac = np.clip(wgt / vmax_eff, 0, 1) if vmax_eff > 0 else 1
+                alpha = min_alpha + frac * (1 - min_alpha)
+                lwi = lw if lw_range is None else lw_range[0] + frac * (lw_range[1] - lw_range[0])
+            else:
+                alpha = alpha_fixed
+                lwi = lw
             ax.plot([x1, x2], [y1_, y2_], '-', lw=lwi, color=link_color, alpha=alpha, zorder=1)
 
     # ------------------------------------------------------------------
@@ -1002,6 +1082,7 @@ label_dict2={'CN_CI':'Persistent:\n constant', 'CN_DI':'Persistent:\n decreasing
 year_label_dict={2016:'2015-16', 2017:'2016-17', 2018:'2017-18', 2019:'2018-19', 2020:'2019-20', 2021:'2020-21', 2022:'2021-22'}
 
 # Plots showing each year ######################################333
+#use by plot_doverging bars qwith cosntant
 def plot_diverging_bars(df_site, value_col='freq_sum', ax=None,
                          loss_metrics=('CN_LI', 'L1N_LI', 'LBN_LI'),
                          gain_metrics=('CN_GI', 'G1N_GI', 'GBN_GI'),
@@ -1013,12 +1094,13 @@ def plot_diverging_bars(df_site, value_col='freq_sum', ax=None,
     c_blue = '#0072B2'
     c_yellow = '#E69F00'
     c_green = '#009455'
-    Grafico de barras apiladas DIVERGENTE: las metricas de perdida (loss_metrics)
-    se apilan hacia ABAJO (valores negativos), las de ganancia (gain_metrics) se
-    apilan hacia ARRIBA (valores positivos) -- una barra por año.
 
-    (Sin cambios respecto a la version anterior -- se mantiene para poder
-    seguir usandola sola si no quieres el panel superior.)
+    DIVERGING stacked bar plot: the loss metrics (loss_metrics) are stacked
+    DOWNWARDS (negative values), the gain metrics (gain_metrics) are stacked
+    UPWARDS (positive values) -- one bar per year.
+
+    (Unchanged from the previous version -- kept so it can still be used on
+    its own if you do not want the top panel.)
     """
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -1061,7 +1143,7 @@ def plot_diverging_bars(df_site, value_col='freq_sum', ax=None,
 
     return ax
 
-
+#used by plot_diverging_bars_with_constant
 def plot_constant_bars(df_site, value_col='freq_sum', ax=None,
                         constant_metrics=('CN_DI', 'CN_CI', 'CN_II'),
 constant_facecolor='#009455',
@@ -1070,39 +1152,43 @@ constant_edgecolors=('#C6DFEE', None, '#F9E9C6'),
                         hatch_linewidth=2.0,
                         year_col='year', metric_col='metric'):
     """
-    Panel SUPERIOR: barras apiladas (NO divergentes, todo hacia arriba) con las
-    categorias del bloque de especies permanentes que NO implican perdida/ganancia
-    de nodo -- CN_DI (disminuye), CN_CI (constante), CN_II (aumenta).
+    TOP panel: stacked bars (NOT diverging, everything upwards) with the
+    categories of the permanent-species block that do NOT involve loss/gain
+    of a node -- CN_DI (decreases), CN_CI (constant), CN_II (increases).
 
-    Todas usan el MISMO color de fondo gris (constant_facecolor), para que no se
-    confundan con los colores solidos rojo/azul del panel divergente. Para poder
-    distinguir DI de CI de II sin añadir colores nuevos, se usa un patron de
-    rayas (hatch) en el borde:
-      - CN_DI: gris de fondo + rayas ROJAS (mismo rojo que las perdidas de abajo)
-      - CN_CI: gris liso, SIN rayas (no cambia -- ni perdida ni ganancia)
-      - CN_II: gris de fondo + rayas AZULES (mismo azul que las ganancias de abajo)
+    All of them use the SAME gray background color (constant_facecolor), so
+    that they are not confused with the solid red/blue colors of the
+    diverging panel. To distinguish DI from CI from II without adding new
+    colors, a stripe pattern (hatch) is used on the edge:
+      - CN_DI: gray background + RED stripes (the same red as the losses
+        below)
+      - CN_CI: plain gray, NO stripes (no change -- neither loss nor gain)
+      - CN_II: gray background + BLUE stripes (the same blue as the gains
+        below)
 
-    Las rayas se dibujan SIN el marco/borde exterior de la barra (linewidth=0
-    en la barra), y su grosor se controla aparte via hatch_linewidth -- son dos
-    cosas independientes en matplotlib (el borde del rectangulo usa 'linewidth',
-    las rayas del hatch usan rcParams['hatch.linewidth']).
+    The stripes are drawn WITHOUT the outer frame/border of the bar
+    (linewidth=0 on the bar), and their thickness is controlled separately
+    via hatch_linewidth -- these are two independent things in matplotlib
+    (the rectangle border uses 'linewidth', the hatch stripes use
+    rcParams['hatch.linewidth']).
 
-    Mismo eje x (años) que plot_diverging_bars, pensado para compartir figura.
+    Same x axis (years) as plot_diverging_bars, designed to share a figure.
 
     Parameters
     ----------
     constant_facecolor : str
-        Color de fondo UNICO para las tres categorias (gris, para no competir
-        con el rojo/azul del panel de abajo).
-    constant_edgecolors : tuple de (str o None)
-        Color de las rayas de cada categoria, en el mismo orden que
-        constant_metrics. None = sin rayas (gris liso).
-    constant_hatches : tuple de (str o None)
-        Patron de rayas de cada categoria (p.ej. '///', 'xxx'), mismo orden
-        que constant_metrics. None = sin rayas.
+        SINGLE background color for the three categories (gray, so that it
+        does not compete with the red/blue of the bottom panel).
+    constant_edgecolors : tuple of (str or None)
+        Color of the stripes of each category, in the same order as
+        constant_metrics. None = no stripes (plain gray).
+    constant_hatches : tuple of (str or None)
+        Stripe pattern of each category (e.g., '///', 'xxx'), same order as
+        constant_metrics. None = no stripes.
     hatch_linewidth : float
-        Grosor de las rayas del hatch (NO del borde de la barra, que se deja
-        siempre en 0). Sube este valor para rayas mas gruesas/visibles.
+        Thickness of the hatch stripes (NOT of the bar border, which is
+        always left at 0). Raise this value for thicker/more visible
+        stripes.
     """
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 2.5))
@@ -1145,7 +1231,7 @@ constant_edgecolors=('#C6DFEE', None, '#F9E9C6'),
 
     return ax
 
-
+#used by plot_species_and_turnover_summary; uses plot_cosntant_bars, plot_diverging_bars
 def plot_diverging_bars_with_constant(df_site, value_col='n_interactions', figsize=(16, 15),
                                        height_ratios=(1, 2), match_scale=True,
                                        ylim_top=None,
@@ -1162,16 +1248,15 @@ def plot_diverging_bars_with_constant(df_site, value_col='n_interactions', figsi
                                        rotate_years=90, year_label_dict=None,
                                        ax_top=None, ax_bottom=None,fontsize=20):
     """
-    Figura de UN sitio con DOS paneles, eje x (año) compartido.
- 
-    NUEVO: acepta ax_top/ax_bottom externos -- si se pasan AMBOS, dibuja
-    sobre esos ejes en vez de crear una figura nueva. Se corrige tambien
-    el bug de year_label_dict usado sin ser parametro.
- 
-    Devuelve
+    Figure for ONE site with TWO panels, shared x axis (year).
+    NEW: accepts external ax_top/ax_bottom -- if BOTH are passed, it draws
+    on those axes instead of creating a new figure. Also fixes the bug of
+    year_label_dict being used without being a parameter.
+
+    Returns
     -------
-    Si ax_top/ax_bottom son None: fig, (ax_top, ax_bottom)
-    Si se pasaron: (ax_top, ax_bottom)
+    If ax_top/ax_bottom are None: fig, (ax_top, ax_bottom)
+    If they were passed: (ax_top, ax_bottom)
     """
     if year_label_dict is None:
         year_label_dict = {}
@@ -1219,7 +1304,7 @@ def plot_diverging_bars_with_constant(df_site, value_col='n_interactions', figsi
     else:
         return ax_top, ax_bottom
  
-
+#used by plot_species_and_turnover_summary; no dependencies
 def plot_species_turnover(df_site, ax=None, figsize=(8, 5),
                            in_metric='A2', out_metric='A1', permanent_metric='PA',
                            in_color='#E69F00', out_color='#0072B2',
@@ -1228,32 +1313,31 @@ def plot_species_turnover(df_site, ax=None, figsize=(8, 5),
                            bar_width=0.6, marker_size=6, rotate_years=90,
                            year_label_dict=None, fontsize=20, show_legend=True):
     """
-    Turnover de especies (p.ej. polinizadores) por año, para UN sitio.
- 
-    Eje x: años. Para cada año:
-      - Barra hacia ARRIBA: numero de especies que ENTRAN ese año (in_metric,
-        por defecto 'A2' -- exclusivas del año 2 de esa transicion).
-      - Barra hacia ABAJO (negativa): numero de especies que SALEN (out_metric,
-        por defecto 'A1' -- exclusivas del año 1).
-      - Punto GRIS conectado por linea: numero TOTAL de especies ese año
-        (permanentes + entran + salen -- PA+A1+A2).
-      - Punto de otro color conectado por linea: numero de especies
-        PERMANENTES ese año (permanent_metric, por defecto 'PA').
- 
+    Species turnover (e.g., pollinators) per year, for ONE site.
+    X axis: years. For each year:
+      - Bar UPWARDS: number of species that ENTER that year (in_metric,
+        default 'A2' -- exclusive to year 2 of that transition).
+      - Bar DOWNWARDS (negative): number of species that LEAVE (out_metric,
+        default 'A1' -- exclusive to year 1).
+      - GRAY point connected by a line: TOTAL number of species that year
+        (permanent + entering + leaving -- PA+A1+A2).
+      - Point of another color connected by a line: number of PERMANENT
+        species that year (permanent_metric, default 'PA').
+
     Parameters
     ----------
     df_site : pd.DataFrame
-        Ya filtrado a UN Site_ID (p.ej. df.loc["sitio_1"]), con columnas o
-        niveles year_col/metric_col/value_col -- salida de rewiring_freq_py
-        (la segunda tabla, node_counts) apilada por año.
+        Already filtered to ONE Site_ID (e.g., df.loc["site_1"]), with
+        columns or levels year_col/metric_col/value_col -- output of
+        rewiring_freq_py (the second table, node_counts) stacked by year.
     in_metric, out_metric, permanent_metric : str
-        Nombres de fila en metric_col a usar para entran/salen/permanentes.
-        Por defecto para polinizadores: 'A2'/'A1'/'PA'. Para plantas usa
+        Row names in metric_col to use for entering/leaving/permanent.
+        Defaults for pollinators: 'A2'/'A1'/'PA'. For plants use
         'P2'/'P1'/'PP'.
-    year_label_dict : dict o None
-        {año: texto legible} para el eje x.
- 
-    Devuelve
+    year_label_dict : dict or None
+        {year: readable text} for the x axis.
+
+    Returns
     -------
     ax
     """
@@ -1297,35 +1381,34 @@ def plot_species_turnover(df_site, ax=None, figsize=(8, 5),
  
     return ax
 
-# final plot, combination of the itneractions and species
+# final plot, combination of the itneractions and species disaggregated in time
 def plot_species_and_turnover_summary(
         df_site_species, df_site_interactions,
         figsize=(20, 12), height_ratios=(1, 2),
         plant_kwargs=None, pollinator_kwargs=None, diverging_kwargs=None,rotate_years=90,fontsize=24):
     """
-    Figura compuesta de UN sitio, 2x2:
-      - columna izquierda: plot_species_turnover -- arriba PLANTAS
-        (P2/P1/PP), abajo POLINIZADORES (A2/A1/PA).
-      - columna derecha: plot_diverging_bars_with_constant -- arriba
-        constante/aumenta/disminuye, abajo perdida/ganancia.
- 
-    Las DOS columnas comparten el MISMO height_ratios: el panel de abajo
-    (polinizadores / divergente) ocupa mas alto que el de arriba (plantas /
-    constante), en ambas columnas a la vez.
- 
+    Composite figure for ONE site, 2x2:
+      - left column: plot_species_turnover -- PLANTS on top
+        (P2/P1/PP), POLLINATORS below (A2/A1/PA).
+      - right column: plot_diverging_bars_with_constant -- constant/gained/
+        lost-strength on top, loss/gain below.
+    BOTH columns share the SAME height_ratios: the bottom panel
+    (pollinators / diverging) is taller than the top one (plants /
+    constant), in both columns at once.
+
     Parameters
     ----------
     df_site_plants, df_site_pollinators : pd.DataFrame
-        Tablas de turnover de especies, ya filtradas a UN Site_ID.
+        Species turnover tables, already filtered to ONE Site_ID.
     df_site_interactions : pd.DataFrame
-        Tabla de cambios de interacciones (Changes_df), ya filtrada a UN
+        Interaction change table (Changes_df), already filtered to ONE
         Site_ID.
     height_ratios : (float, float)
-        Alto relativo arriba/abajo, aplicado a AMBAS columnas.
-    plant_kwargs, pollinator_kwargs, diverging_kwargs : dict o None
-        Parametros extra para cada funcion.
- 
-    Devuelve
+        Relative height of top/bottom, applied to BOTH columns.
+    plant_kwargs, pollinator_kwargs, diverging_kwargs : dict or None
+        Extra parameters for each function.
+
+    Returns
     -------
     fig, (ax_plants, ax_poll, ax_top, ax_bottom)
     """
@@ -1398,31 +1481,31 @@ def plot_diverging_bars_with_constant_all_sites(
         rotate_years=90, year_label_dict=None, label_dict=None,
         hatch_legend_order=(1, 2, 0), legend_ncol=3):
     """
-    Version 'todos los sitios' de plot_diverging_bars_with_constant: para CADA
-    Site_ID, dibuja los dos paneles (constante arriba + divergente abajo),
-    organizados en una grilla nrow x ncol (por defecto 3x4, para 12 sitios).
+    'All sites' version of plot_diverging_bars_with_constant: for EACH
+    Site_ID, draws the two panels (constant on top + diverging below),
+    arranged in an nrow x ncol grid (3x4 by default, for 12 sites).
 
-    Replica los mismos parametros/colores/comportamiento que la version de
-    un solo sitio (MultipleLocator para los ticks del eje y, year_label_dict
-    para las etiquetas de año, orden del hatch en la leyenda) para que ambas
-    figuras sean visualmente coherentes.
+    Replicates the same parameters/colors/behavior as the single-site
+    version (MultipleLocator for the y-axis ticks, year_label_dict for the
+    year labels, hatch order in the legend) so that both figures are
+    visually consistent.
 
     Parameters
     ----------
-    year_label_dict : dict o None
-        {año: texto legible}. Si None, se usan los años tal cual.
-    label_dict : dict o None
-        {codigo_metrica: texto legible}, usado en la leyenda combinada.
-    hatch_legend_order : tuple de int
-        Orden de las 3 entradas del bloque "constante" en la leyenda, como
-        indices sobre constant_metrics=('CN_DI','CN_CI','CN_II'). Por defecto
-        (1, 2, 0) = CN_CI, CN_II, CN_DI (constante, aumenta, disminuye).
+    year_label_dict : dict or None
+        {year: readable text}. If None, the years are used as they are.
+    label_dict : dict or None
+        {metric_code: readable text}, used in the combined legend.
+    hatch_legend_order : tuple of int
+        Order of the 3 entries of the "constant" block in the legend, as
+        indices over constant_metrics=('CN_DI','CN_CI','CN_II'). By default
+        (1, 2, 0) = CN_CI, CN_II, CN_DI (constant, increases, decreases).
     sharey : {'row', 'all', None}
-        Igual que en plot_diverging_bars_all_sites.
+        Same as in plot_diverging_bars_all_sites.
     ytick_step : float
-        Paso de MultipleLocator para el eje y de TODOS los paneles.
+        MultipleLocator step for the y axis of ALL panels.
 
-    Devuelve
+    Returns
     -------
     fig, site_axes : dict {site: (ax_top, ax_bottom)}
     """
@@ -1553,27 +1636,26 @@ def plot_species_turnover_all_sites(
         fontsize=8, rotate_labels=90,
         inner_hspace=0.08, outer_hspace=0.5, wspace=0.3):
     """
-    Version 'todos los sitios': para CADA Site_ID, dibuja los DOS paneles
-    de plot_species_turnover (plantas arriba, polinizadores abajo).
- 
-    GridSpec ANIDADO: uno EXTERIOR controla el espacio ENTRE sitios
-    (outer_hspace, mayor), y dentro de cada sitio, uno INTERIOR (2x1)
-    controla el espacio entre plantas/polinizadores de ESE sitio
-    (inner_hspace, menor) -- los dos espaciados se ajustan por separado.
- 
+    'All sites' version: for EACH Site_ID, draws the TWO panels of
+    plot_species_turnover (plants on top, pollinators below).
+    NESTED GridSpec: an OUTER one controls the space BETWEEN sites
+    (outer_hspace, larger), and within each site, an INNER one (2x1)
+    controls the space between plants/pollinators of THAT site
+    (inner_hspace, smaller) -- the two spacings are adjusted separately.
+
     Parameters
     ----------
     height_ratios_per_site : (float, float)
-        Alto relativo plantas/polinizadores DENTRO de cada sitio. Por
-        defecto (1, 2).
+        Relative height of plants/pollinators WITHIN each site. Default
+        (1, 2).
     inner_hspace : float
-        Espacio vertical entre plantas y polinizadores del MISMO sitio.
+        Vertical space between plants and pollinators of the SAME site.
     outer_hspace : float
-        Espacio vertical entre una fila de sitios y la siguiente.
+        Vertical space between one row of sites and the next.
     wspace : float
-        Espacio horizontal entre columnas de sitios.
- 
-    Devuelve
+        Horizontal space between columns of sites.
+
+    Returns
     -------
     fig, site_axes : dict {site: (ax_plants, ax_poll)}
     """
@@ -1647,7 +1729,7 @@ def plot_species_turnover_all_sites(
 
 
 # -----------------------------------------------------------------------
-# helpers internos -- dibujan sobre un ax dado, sin crear figura/leyenda propia
+# internal helpers  -- to plot inside an existent axis, dom not create new figure
 # -----------------------------------------------------------------------
 
 def _plot_constant_on_ax(df_site, value_col, ax, constant_metrics, constant_facecolor,
@@ -1714,43 +1796,43 @@ def plot_species_summary_single(
         plant_icon='\u273F', animal_icon='\u2653',
         icon_fontsize=30, icon_y=-0.03):
     """
-    Version de UN SOLO PANEL de plot_species_summary: las 4 categorias
+    SINGLE-PANEL version of plot_species_summary: the four categories
     (Permanent Plants, Transient Plants, Permanent Animals, Transient Animals)
-    en el MISMO eje x, en vez de dos paneles separados.
+    on the SAME x axis, instead of two separate panels.
 
-    Espaciado: Permanent-Transient DENTRO del mismo grupo (plantas o animales)
-    quedan mas cerca entre si (within_gap); el hueco ENTRE el grupo de plantas
-    y el de animales es mayor (between_gap) -- para que se lean como dos
-    "bloques" claramente separados.
+    Spacing: Permanent and Transient bars WITHIN the same group (plants or
+    animals) are placed closer together (within_gap); the gap BETWEEN the
+    plant group and the animal group is larger (between_gap), so that they
+    read as two clearly separated "blocks".
 
-    Cada categoria "Permanent" es una barra simple (media +- std a traves de
-    los años). Cada categoria "Transient" es una barra divergente (entra
-    hacia arriba, sale hacia abajo, ligeramente desplazadas entre si via
-    updown_offset), igual que en el panel inferior de plot_species_summary.
+    Each "Permanent" category is a single bar (mean +- std across years).
+    Each "Transient" category is a diverging bar (gained upwards, lost
+    downwards, slightly shifted from each other via updown_offset), as in
+    the lower panel of plot_species_summary.
 
     Parameters
     ----------
     df_site : pd.DataFrame
-        Ya filtrado a UN Site_ID, con year/metric/value_col.
+        Already filtered to a SINGLE Site_ID, with year/metric/value_col.
     within_gap : float
-        Distancia en x entre la barra "Permanent" y la "Transient" del MISMO
-        grupo (plantas o animales).
+        Distance on the x axis between the "Permanent" and the "Transient"
+        bars of the SAME group (plants or animals).
     between_gap : float
-        Distancia en x entre el grupo de plantas y el grupo de animales
-        (deberia ser mayor que within_gap).
+        Distance on the x axis between the plant group and the animal group
+        (should be larger than within_gap).
     show_points : bool
-        Superpone los valores individuales (un punto por año) con jitter.
+        Overlays the individual values (one point per year) with jitter.
     plant_icon, animal_icon : str
-        Caracter Unicode a mostrar debajo de cada bloque de etiquetas.
-        Por defecto plant_icon='\u273F', animal_icon='\u2653'
+        Unicode character to display below each block of labels.
+        By default plant_icon='\u273F', animal_icon='\u2653'
     icon_fontsize : float
-        Tamaño de los iconos.
+        Size of the icons.
     icon_y : float
-        Posicion vertical de los iconos, en fraccion del eje (coordenadas
-        de ejes, no de datos) -- mas negativo = mas abajo, para dejar
-        hueco a las xticklabels que ya estan debajo del eje.
+        Vertical position of the icons, as a fraction of the axis (axes
+        coordinates, not data coordinates) -- the more negative, the lower,
+        to leave room for the xtick labels that already sit below the axis.
 
-    Devuelve
+    Returns
     -------
     ax
     """
@@ -1847,37 +1929,37 @@ def plot_diverging_bars_mean_error(df, value_col='freq_sum', ax=None, figsize=(5
                                     show_points=True, point_color='black',
                                     point_alpha=0.35, point_size=12, jitter=0.1):
     """
-    Grafico de barras con barra de error. Eje x: las 3 categorias de nodo
-    (Permanent-Permanent / Permanent-Transient / Transient-Transient), NO los
-    años. Para cada categoria hay DOS barras (perdida hacia abajo, ganancia
-    hacia arriba), SIN apilar entre si -- y ligeramente DESPLAZADAS entre si
-    (perdida a la izquierda, ganancia a la derecha) via updown_offset, para
-    que no queden perfectamente alineadas.
+    Bar plot with error bars. X axis: the 3 node categories
+    (Permanent-Permanent / Permanent-Transient / Transient-Transient), NOT the
+    years. For each category there are TWO bars (loss downwards, gain
+    upwards), NOT stacked on each other -- and slightly SHIFTED from each
+    other (loss to the left, gain to the right) via updown_offset, so that
+    they are not perfectly aligned.
 
-    Altura de cada barra = media de value_col a traves de TODAS las filas de
-    df para esa metrica (si pasas el df completo, sitios x años; si pasas
-    df de un solo sitio, la media es solo a traves de los años de ese sitio).
-    Barra de error = desviacion estandar de esa misma coleccion.
+    Height of each bar = mean of value_col across ALL rows of df for that
+    metric (if you pass the full df, sites x years; if you pass a df for a
+    single site, the mean is only across the years of that site).
+    Error bar = standard deviation of that same collection.
 
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame con Site_ID/year/metric como MultiIndex o columnas. Puede
-        ser el df completo (todos los sitios) o ya filtrado a un sitio.
-    loss_metrics, gain_metrics : tuple de 3 str
-        En el orden (CN, 1-nuevo, ambas-nuevas).
-    category_labels : tuple de 3 str
-        Etiquetas del eje x, mismo orden que loss_metrics/gain_metrics.
-    loss_colors, gain_colors : tuple de 3 str
-        Un color por categoria (mismo orden que loss_metrics/gain_metrics).
+        DataFrame with Site_ID/year/metric as MultiIndex or columns. It can
+        be the full df (all sites) or already filtered to one site.
+    loss_metrics, gain_metrics : tuple of 3 str
+        In the order (CN, 1-new, both-new).
+    category_labels : tuple of 3 str
+        X axis labels, same order as loss_metrics/gain_metrics.
+    loss_colors, gain_colors : tuple of 3 str
+        One color per category (same order as loss_metrics/gain_metrics).
     updown_offset : float
-        Desplazamiento horizontal entre la barra de perdida (se mueve a la
-        IZQUIERDA) y la de ganancia (se mueve a la DERECHA) dentro de cada
-        categoria. 0 = sin desplazamiento (alineadas).
+        Horizontal shift between the loss bar (moved to the LEFT) and the
+        gain bar (moved to the RIGHT) within each category. 0 = no shift
+        (aligned).
     show_points : bool
-        Si True (por defecto), superpone los valores individuales con jitter.
+        If True (default), overlays the individual values with jitter.
 
-    Devuelve
+    Returns
     -------
     ax
     """
@@ -1945,42 +2027,40 @@ def plot_interactions_summary(
         show_points=True, point_color='black', point_alpha=0.8,
         point_size=12, jitter=0.1, ax_top=None, ax_bottom=None):
     """
-    Figura de UN sitio (df_site) con DOS paneles, para las INTERACCIONES
-    (a diferencia de plot_species_summary_single, que es para especies/nodos):
- 
-      - panel superior: 3 barras SIN apilar -- CN_CI (verde liso), CN_DI
-        (verde + rayas azules), CN_II (verde + rayas amarillas) -- media +-
-        std a traves de los AÑOS de este sitio (df_site ya viene de un
-        unico Site_ID).
-      - panel inferior: plot_diverging_bars_mean_error aplicada a df_site
-        -- como solo se le pasa un sitio, la media +- std tambien es solo
-        a traves de los años de ESE sitio. Perdida (azul) desplazada a la
-        izquierda, ganancia (amarillo) desplazada a la derecha, dentro de
-        cada una de las 3 categorias de nodo (Permanent-Permanent /
-        Permanent-Transient / Transient-Transient).
- 
+    Figure for ONE site (df_site) with TWO panels, for INTERACTIONS
+    (unlike plot_species_summary_single, which is for species/nodes):
+      - top panel: 3 UNSTACKED bars -- CN_CI (plain green), CN_DI
+        (green + blue stripes), CN_II (green + yellow stripes) -- mean +-
+        std across the YEARS of this site (df_site already comes from a
+        single Site_ID).
+      - bottom panel: plot_diverging_bars_mean_error applied to df_site
+        -- since only one site is passed, the mean +- std is also only
+        across the years of THAT site. Loss (blue) shifted to the left,
+        gain (yellow) shifted to the right, within each of the 3 node
+        categories (Permanent-Permanent / Permanent-Transient /
+        Transient-Transient).
+
     Parameters
     ----------
     df_site : pd.DataFrame
-        Ya filtrado a UN Site_ID, con year/metric/value_col para todos los
-        años de ese sitio.
-    constant_metrics : tuple de 3 str
-        (constante, disminuye, aumenta) -- CN_CI/CN_DI/CN_II por defecto.
-    constant_edgecolors, constant_hatches : tuple de 3 (str o None)
-        Estilo de cada barra del panel superior, mismo orden que
-        constant_metrics. None = sin rayas (solo el color solido).
-    ax_top, ax_bottom : matplotlib Axes o None
-        Si se pasan AMBOS, se dibuja sobre esos ejes en vez de crear una
-        figura nueva -- util para componer esta figura dentro de otra mas
-        grande (p.ej. junto a plot_species_summary_single). Si se dejan en
-        None (por defecto), se crea una figura nueva de 2 paneles como
-        siempre.
- 
-    Devuelve
+        Already filtered to ONE Site_ID, with year/metric/value_col for all
+        the years of that site.
+    constant_metrics : tuple of 3 str
+        (constant, decreases, increases) -- CN_CI/CN_DI/CN_II by default.
+    constant_edgecolors, constant_hatches : tuple of 3 (str or None)
+        Style of each bar of the top panel, same order as
+        constant_metrics. None = no stripes (solid color only).
+    ax_top, ax_bottom : matplotlib Axes or None
+        If BOTH are passed, drawing is done on those axes instead of
+        creating a new figure -- useful to compose this figure inside a
+        larger one (e.g., next to plot_species_summary_single). If left as
+        None (default), a new 2-panel figure is created as usual.
+
+    Returns
     -------
-    Si ax_top/ax_bottom son None: fig, (ax_top, ax_bottom)
-    Si se pasaron ax_top/ax_bottom: (ax_top, ax_bottom) -- sin fig, porque
-    la figura ya existia de antes (la creo quien llama).
+    If ax_top/ax_bottom are None: fig, (ax_top, ax_bottom)
+    If ax_top/ax_bottom were passed: (ax_top, ax_bottom) -- without fig,
+    because the figure already existed beforehand (the caller creates it).
     """
     df_flat = df_site.reset_index() if df_site.index.nlevels > 1 or df_site.index.name is not None else df_site.copy()
  
@@ -2066,42 +2146,41 @@ def plot_interaction_frequency_bars(
         show_points=True, point_color='black', point_alpha=0.35,
         point_size=14, jitter=0.08):
     """
-    Grafico de barras HORIZONTALES: frecuencia media por interaccion
-    (freq_sum/n_interactions) de cada una de las 9 categorias, para UN sitio.
- 
-    Orden de arriba a abajo (por defecto): CN_CI, CN_DI, CN_II -- bloque
-    permanente; CN_GI, G1N_GI, GBN_GI -- ganancias; CN_LI, L1N_LI, LBN_LI --
-    perdidas.
- 
-    CN_DI y CN_II llevan el MISMO estilo de rayas (hatch) que en
-    plot_interactions_summary: verde de fondo + rayas azules (CN_DI) o
-    amarillas (CN_II), en vez de color solido.
- 
-    Eje y: las 9 categorias (metrics), con su etiqueta a la IZQUIERDA (layout
-    estandar de barh). Eje x: frecuencia media por interaccion. Cada fila del
-    df_site (un año, una categoria) aporta un valor freq_col/n_col para los
-    puntos/barra de error; la barra en si es la razon AGREGADA (suma de
-    freq_col entre suma de n_col, sumando todos los años).
- 
+    HORIZONTAL bar plot: mean frequency per interaction
+    (freq_sum/n_interactions) of each of the 9 categories, for ONE site.
+    Order from top to bottom (default): CN_CI, CN_DI, CN_II -- permanent
+    block; CN_GI, G1N_GI, GBN_GI -- gains; CN_LI, L1N_LI, LBN_LI --
+    losses.
+    CN_DI and CN_II use the SAME hatch style as in
+    plot_interactions_summary: green background + blue stripes (CN_DI) or
+    yellow stripes (CN_II), instead of a solid color.
+    Y axis: the 9 categories (metrics), with their label on the LEFT
+    (standard barh layout). X axis: mean frequency per interaction. Each
+    row of df_site (one year, one category) contributes one value
+    freq_col/n_col for the points/error bar; the bar itself is the
+    AGGREGATED ratio (sum of freq_col divided by sum of n_col, summing over
+    all years).
+
     Parameters
     ----------
     df_site : pd.DataFrame
-        Ya filtrado a UN Site_ID -- Changes_df.loc[site].
+        Already filtered to ONE Site_ID -- Changes_df.loc[site].
     freq_col, n_col : str
-        Columnas a dividir (freq_col / n_col).
-    metrics : tuple de 9 str
-        Orden de las categorias de arriba a abajo en el eje y.
-    colors : tuple de 9 str
-        Color de fondo (facecolor) de cada categoria, mismo orden que metrics.
-    edgecolors, hatches : tuple de 9 (str o None)
-        Estilo de rayas por categoria, mismo orden que metrics. None = sin
-        rayas (barra solida, usa solo el color de colors).
+        Columns to divide (freq_col / n_col).
+    metrics : tuple of 9 str
+        Order of the categories from top to bottom on the y axis.
+    colors : tuple of 9 str
+        Background color (facecolor) of each category, same order as
+        metrics.
+    edgecolors, hatches : tuple of 9 (str or None)
+        Hatch style per category, same order as metrics. None = no stripes
+        (solid bar, uses only the color from colors).
     hatch_linewidth : float
-        Grosor de las rayas del hatch.
-    label_dict : dict o None
-        {codigo_metrica: texto legible} para las etiquetas del eje y.
- 
-    Devuelve
+        Line width of the hatch stripes.
+    label_dict : dict or None
+        {metric_code: readable text} for the y axis labels.
+
+    Returns
     -------
     ax
     """
@@ -2161,42 +2240,42 @@ def plot_species_and_interactions_summary(
         figsize=(15, 7), width_ratios=(1, 1.4, 1), height_ratios=(1, 1.4),
         species_kwargs=None, interactions_kwargs=None, frequency_kwargs=None):
     """
-    Figura compuesta de UN sitio: plot_species_summary_single a la IZQUIERDA
-    (un unico panel), plot_interactions_summary en el CENTRO (dos paneles
-    apilados), y plot_interaction_frequency_bars a la DERECHA (un unico
-    panel, barras horizontales) -- reutilizando las tres funciones tal cual,
-    sin duplicar logica.
- 
+    Composite figure for ONE site: plot_species_summary_single on the LEFT
+    (a single panel), plot_interactions_summary in the CENTER (two stacked
+    panels), and plot_interaction_frequency_bars on the RIGHT (a single
+    panel, horizontal bars) -- reusing the three functions as they are,
+    without duplicating logic.
+
     Parameters
     ----------
     node_changes_df_site : pd.DataFrame
-        Ya filtrado a UN Site_ID -- tabla de turnover de ESPECIES/NODOS
-        (PP/PA/P1/P2/A1/A2 en metric_col), la misma que usas para
-        plot_species_summary_single (tu "node_changes_df").
+        Already filtered to ONE Site_ID -- SPECIES/NODE turnover table
+        (PP/PA/P1/P2/A1/A2 in metric_col), the same one you use for
+        plot_species_summary_single (your "node_changes_df").
     changes_df_site : pd.DataFrame
-        Ya filtrado a UN Site_ID -- tabla de cambios de INTERACCIONES
-        (CN_CI/CN_DI/CN_II/CN_LI/CN_GI/L1N_LI/LBN_LI/G1N_GI/GBN_GI en
-        metric_col), la misma que usas para plot_interactions_summary
-        (tu "Changes_df"). Se reutiliza TAMBIEN para el panel derecho
-        (plot_interaction_frequency_bars) -- misma tabla, otra vista.
+        Already filtered to ONE Site_ID -- INTERACTION change table
+        (CN_CI/CN_DI/CN_II/CN_LI/CN_GI/L1N_LI/LBN_LI/G1N_GI/GBN_GI in
+        metric_col), the same one you use for plot_interactions_summary
+        (your "Changes_df"). It is ALSO reused for the right panel
+        (plot_interaction_frequency_bars) -- same table, another view.
     width_ratios : (float, float, float)
-        Ancho relativo columna izquierda (species) / centro (interactions) /
-        derecha (frequency bars).
+        Relative width of the left (species) / center (interactions) /
+        right (frequency bars) columns.
     height_ratios : (float, float)
-        Alto relativo panel superior/inferior de la columna CENTRAL (se pasa
-        tal cual a plot_interactions_summary). Las columnas izquierda y
-        derecha ocupan el alto TOTAL (ambas filas) cada una.
-    species_kwargs : dict o None
-        Parametros extra para plot_species_summary_single (ademas de
-        node_changes_df_site y ax) -- p.ej. {'value_col': 'n_nodes', ...}.
-    interactions_kwargs : dict o None
-        Parametros extra para plot_interactions_summary (ademas de
-        changes_df_site, ax_top, ax_bottom) -- p.ej. {'value_col': 'freq_sum', ...}.
-    frequency_kwargs : dict o None
-        Parametros extra para plot_interaction_frequency_bars (ademas de
-        changes_df_site y ax) -- p.ej. {'freq_col': 'freq_sum', 'n_col': 'n_interactions', ...}.
- 
-    Devuelve
+        Relative height of the top/bottom panel of the CENTER column (passed
+        as is to plot_interactions_summary). The left and right columns
+        each take the TOTAL height (both rows).
+    species_kwargs : dict or None
+        Extra parameters for plot_species_summary_single (in addition to
+        node_changes_df_site and ax) -- e.g. {'value_col': 'n_nodes', ...}.
+    interactions_kwargs : dict or None
+        Extra parameters for plot_interactions_summary (in addition to
+        changes_df_site, ax_top, ax_bottom) -- e.g. {'value_col': 'freq_sum', ...}.
+    frequency_kwargs : dict or None
+        Extra parameters for plot_interaction_frequency_bars (in addition to
+        changes_df_site and ax) -- e.g. {'freq_col': 'freq_sum', 'n_col': 'n_interactions', ...}.
+
+    Returns
     -------
     fig, (ax_species, ax_int_top, ax_int_bottom, ax_freq)
     """
@@ -2240,98 +2319,6 @@ def plot_species_and_interactions_summary(
  
     return fig, (ax_species, ax_int_top, ax_int_bottom, ax_freq)
  
-
-#statisticfal test 
-
-from scipy.stats import kruskal
-import scikit_posthocs as sp
-
-def test_interaction_frequency_differences(
-        df_site, freq_col='freq_interactions', n_col='n_interactions',
-        metrics=('CN_CI', 'CN_DI', 'CN_II', 'CN_LI', 'CN_GI', 'L1N_LI', 'LBN_LI', 'G1N_GI', 'GBN_GI'),
-        metric_col='metric', alpha=0.05):
-    """
-    Test estadistico para saber si la frecuencia media por interaccion
-    (freq_col/n_col) difiere entre las 9 categorias.
- 
-    1. Kruskal-Wallis (no parametrico, equivalente a ANOVA de un factor):
-       compara las 9 categorias A LA VEZ -- responde "¿hay AL MENOS una
-       categoria que difiere de las demas?", sin decir cual.
-       Se usa Kruskal-Wallis en vez de ANOVA porque con pocos años por sitio
-       (tipicamente ~4 puntos por categoria) no se puede asumir normalidad
-       de forma fiable -- Kruskal-Wallis no la requiere.
- 
-    2. Test de Dunn (post-hoc, con correccion de Bonferroni): SOLO si el
-       Kruskal-Wallis sale significativo, compara TODOS los pares de
-       categorias entre si, para saber CUALES son las que difieren.
- 
-    Parameters
-    ----------
-    df_site : pd.DataFrame
-        Ya filtrado a UN Site_ID (o varios, si quieres agregar mas puntos),
-        con metric_col/freq_col/n_col.
-    metrics : tuple de str
-        Categorias a comparar.
-    alpha : float
-        Umbral de significacion (0.05 por defecto).
- 
-    Devuelve
-    -------
-    kw_result : dict
-        {'H': estadistico, 'p_value': float, 'significant': bool}
-    posthoc_df : pd.DataFrame o None
-        Matriz de p-valores (Dunn, Bonferroni) para cada par de categorias --
-        None si el Kruskal-Wallis no fue significativo (no tiene sentido
-        mirar los pares si no hay diferencia global).
-    """
-    df_flat = df_site.reset_index() if df_site.index.nlevels > 1 or df_site.index.name is not None else df_site.copy()
- 
-    # una lista de valores (razon freq/n por año) por cada categoria
-    groups = []
-    labels = []
-    for metric in metrics:
-        sub = df_flat.loc[df_flat[metric_col] == metric]
-        vals = (sub[freq_col] / sub[n_col]).replace([np.inf, -np.inf], np.nan).dropna()
-        if len(vals) > 0:
-            groups.append(vals.values)
-            labels.append(metric)
- 
-    # ------------------------------------------------------------------
-    # 1) Kruskal-Wallis -- diferencia global entre las categorias
-    # ------------------------------------------------------------------
-    H, p_value = kruskal(*groups)
-    significant = p_value < alpha
- 
-    kw_result = {'H': H, 'p_value': p_value, 'significant': significant}
- 
-    print(f"Kruskal-Wallis: H={H:.3f}, p={p_value:.4f} "
-          f"({'SIGNIFICATIVO' if significant else 'no significativo'} a alpha={alpha})")
- 
-    # ------------------------------------------------------------------
-    # 2) Post-hoc de Dunn -- SOLO si el paso 1 fue significativo
-    # ------------------------------------------------------------------
-    posthoc_df = None
-    if significant:
-        # formato "largo" que pide scikit-posthocs: una fila por valor,
-        # con su categoria correspondiente
-        long_data = []
-        for label, vals in zip(labels, groups):
-            for v in vals:
-                long_data.append({'metric': label, 'value': v})
-        long_df = pd.DataFrame(long_data)
- 
-        posthoc_df = sp.posthoc_dunn(long_df, val_col='value', group_col='metric',
-                                      p_adjust='holm')#'bonferroni')
-        posthoc_df = posthoc_df.loc[labels, labels]  # reordena segun 'metrics'
- 
-        print("\nPost-hoc de Dunn (p-valores, correccion Holm/Bonferroni):")
-        print(posthoc_df.round(4))
-    else:
-        print("Como el Kruskal-Wallis no fue significativo, no se hace el post-hoc "
-              "(no habria diferencias que localizar).")
- 
-    return kw_result, posthoc_df
- 
 # TEMPORALITY 
 
 def _compute_site_year_metrics(
@@ -2340,15 +2327,14 @@ def _compute_site_year_metrics(
         permanent_int_categories, change_categories,
         poll_permanent, poll_transient, plant_permanent, plant_transient):
     """
-    Helper interno: calcula, por sitio y año, las variables (proporcion de
-    polinizadores permanentes, de plantas permanentes, numero total de
-    cambios de interaccion, y proporcion de interacciones permanentes) para
-    UN lag. Devuelve 4 dicts {site: [valores por año]}.
- 
-    "Permanente" (interaccion) = la interaccion SIGUE EXISTIENDO en ambos
-    tiempos, cambie o no de intensidad -- CN_CI + CN_DI + CN_II.
-    "Cambio" = la interaccion aparece o desaparece del todo -- el resto de
-    categorias (CN_LI, CN_GI, L1N_LI, LBN_LI, G1N_GI, GBN_GI).
+    Internal helper: computes, per site and year, the variables (proportion
+    of permanent pollinators, of permanent plants, total number of
+    interaction changes, and proportion of permanent interactions) for ONE
+    lag. Returns 4 dicts {site: [values per year]}.
+    "Permanent" (interaction) = the interaction STILL EXISTS at both times,
+    whether or not its intensity changes -- CN_CI + CN_DI + CN_II.
+    "Change" = the interaction appears or disappears altogether -- the rest
+    of the categories (CN_LI, CN_GI, L1N_LI, LBN_LI, G1N_GI, GBN_GI).
     """
     nodes_flat = nodes_df_lag.reset_index() if nodes_df_lag.index.nlevels > 1 or nodes_df_lag.index.name is not None else nodes_df_lag.copy()
     changes_flat = changes_df_lag.reset_index() if changes_df_lag.index.nlevels > 1 or changes_df_lag.index.name is not None else changes_df_lag.copy()
@@ -2408,28 +2394,27 @@ def plot_lag_summary_temporal(
         fontsize=20, sharey=True, rotate_labels=0,
         titles=('Permanent floral visitors', 'Permanent flowering plants','Permanent interactions', 'Permanent frequency')):
     """
-    Version TEMPORAL de plot_persistence_by_distance -- caso particular de
-    plot_lag_summary_combined_horizontal, filtrado SIEMPRE a UN sitio: el
-    eje x son directamente los LAGS (t+1, t+2, t+3, t+4) de ESE sitio --
-    un punto por lag, sin desplazamiento (ya no compiten varias series en
-    la misma posicion x).
- 
-    4 paneles horizontales, mismo estilo que plot_persistence_by_distance.
- 
+    TEMPORAL version of plot_persistence_by_distance -- a particular case of
+    plot_lag_summary_combined_horizontal, ALWAYS filtered to ONE site: the
+    x axis is directly the LAGS (t+1, t+2, t+3, t+4) of THAT site -- one
+    point per lag, with no offset (several series no longer compete for the
+    same x position).
+    4 horizontal panels, same style as plot_persistence_by_distance.
+
     Parameters
     ----------
     All_Nodes, All_Changes : dict {lag: pd.DataFrame}
-        Tus diccionarios completos.
+        Your complete dictionaries.
     site : str
-        El Site_ID a representar -- SIEMPRE se filtra a este sitio.
-    lags : tuple de int
-        Que lags mostrar, en el eje x.
-    ax : lista de 4 matplotlib Axes o None
-        Si se pasa, dibuja sobre esos 4 ejes. Si no, crea figura nueva.
- 
-    Devuelve
+        The Site_ID to plot -- ALWAYS filtered to this site.
+    lags : tuple of int
+        Which lags to show, on the x axis.
+    ax : list of 4 matplotlib Axes or None
+        If passed, draws on those 4 axes. Otherwise, creates a new figure.
+
+    Returns
     -------
-    fig (o None si se pasaron ejes), axes (lista de 4), summary_df
+    fig (or None if axes were passed), axes (list of 4), summary_df
     """
     if cmap is None:
         cmap = plt.cm.Greens
@@ -2537,7 +2522,7 @@ def plot_lag_summary_temporal(
         return axes, summary_df
  
 
-#el horizontal lo usamos norlamente solo con un sitio 
+#horizontal plot, normally for only one beefun site 
 def plot_lag_summary_combined_horizontal(
         All_Nodes, All_Changes, lags=(1, 2, 3, 4), figsize=(22, 4.5),
         site_level='Site_ID', metric_col='metric', year_col='year',
@@ -2552,18 +2537,14 @@ def plot_lag_summary_combined_horizontal(
         rotate_labels=80, label_dict=None, legend_loc='upper right',
         site=None, sharey=True):
     """
-    Version HORIZONTAL con 4 PANELES en fila, compartiendo el eje y:
-      1. Prop. pollinators permanent
-      2. Prop. plants permanent
-      3. Prop. interactions permanent -- usando value_col_changes_1
-         (por defecto 'n_interactions')
-      4. Prop. interactions permanent -- usando value_col_changes_2
-         (por defecto 'freq_interactions')
- 
-    Los paneles 3 y 4 usan la MISMA logica, solo cambia la columna de
-    Changes_df -- asi comparas directamente contar vs pesar por frecuencia.
- 
-    Devuelve
+    HORIZONTAL version with 4 PANELS in a row, sharing the y axis:
+      1. Prop. permanent pollinators
+      2. Prop. permanent plants
+      3. Prop. permanent interactions -- using value_col_changes_1
+         (default 'n_interactions')
+      4. Prop. permanent interactions -- using value_col_changes_2
+         (default 'freq_interactions')
+    Returns
     -------
     fig, (ax1, ax2, ax3, ax4), extra_data
     """
@@ -2652,7 +2633,7 @@ def plot_lag_summary_combined_horizontal(
  
     return fig, (ax1, ax2, ax3, ax4), extra_data 
 
-# All sites 
+# temproal lag for all beefunsites
 def plot_lag_summary_combined_vertical(
         All_Nodes, All_Changes, lags=(1, 2, 3, 4), figsize=(10, 15),
         site_level='Site_ID', metric_col='metric', year_col='year',
@@ -2667,18 +2648,14 @@ def plot_lag_summary_combined_vertical(
         rotate_labels=80, label_dict=None, legend_loc='upper right',
         site=None, sharey=True):
     """
-    Version HORIZONTAL con 4 PANELES en fila, compartiendo el eje y:
+    VERTICAL version with 4 PANELS in a row, sharing the y axis:
       1. Prop. pollinators permanent
       2. Prop. plants permanent
-      3. Prop. interactions permanent -- usando value_col_changes_1
-         (por defecto 'n_interactions')
-      4. Prop. interactions permanent -- usando value_col_changes_2
-         (por defecto 'freq_interactions')
- 
-    Los paneles 3 y 4 usan la MISMA logica, solo cambia la columna de
-    Changes_df -- asi comparas directamente contar vs pesar por frecuencia.
- 
-    Devuelve
+      3. Prop. interactions permanent -- using value_col_changes_1
+         (default 'n_interactions')
+      4. Prop. interactions permanent -- using value_col_changes_2
+         (default 'freq_interactions')
+        Returns
     -------
     fig, (ax1, ax2, ax3, ax4), extra_data
     """
@@ -2780,31 +2757,31 @@ def plot_persistence_by_distance(
         titles=('Permanent floral visitors', 'Permanent flowering plants',
                 'Permanent interactions', 'Permanent frequency')):
     """
-    Analisis de persistencia EN FUNCION DE LA DISTANCIA (bins de distancia
-    entre comparaciones) -- NO es el analisis por lag temporal (analisis
-    distinto), aunque el ESTILO visual es el mismo: 4 paneles en fila, eje
-    y compartido, punto+barra de error por bin, coloreados con degradado.
- 
-    El calculo (persistencia = permanentes / total) es EXACTAMENTE el que
-    ya tenias -- no se modifica ninguna formula.
- 
+    Permanence analysis AS A FUNCTION OF DISTANCE (distance bins between
+    comparisons) -- it is NOT the temporal lag analysis (a different
+    analysis), although the visual STYLE is the same: 4 panels in a row,
+    shared y axis, point + error bar per bin, colored with a gradient.
+    The calculation (persistence = permanent / total) is EXACTLY the one
+    you already had -- no formula is modified.
+
     Parameters
     ----------
     Nodes_df : pd.DataFrame
-        Con columna 'n_nodes' y MultiIndex que incluye 'metric' y bin_level.
+        With an 'n_nodes' column and a MultiIndex that includes 'metric' and
+        bin_level.
     Changes_df : pd.DataFrame
-        Con columnas 'n_interactions'/'freq_interactions' y MultiIndex que
-        incluye 'metric' y bin_level.
+        With 'n_interactions'/'freq_interactions' columns and a MultiIndex
+        that includes 'metric' and bin_level.
     bin_level : str
-        Nivel del indice a usar para agrupar (por defecto 'bin').
-    cmap, cmap_range : colormap y rango
-        Degradado de color a traves de los bins.
-    ax : lista de 4 matplotlib Axes o None
-        Si se pasa, dibuja sobre esos 4 ejes. Si no, crea figura nueva.
- 
-    Devuelve
+        Index level used for grouping (default 'bin').
+    cmap, cmap_range : colormap and range
+        Color gradient across the bins.
+    ax : list of 4 matplotlib Axes or None
+        If passed, draws on those 4 axes. Otherwise, creates a new figure.
+
+    Returns
     -------
-    fig (o None si se pasaron ejes), axes (lista de 4), summary_df
+    fig (or None if axes were passed), axes (list of 4), summary_df
     """
     nodes = Nodes_df["n_nodes"].unstack("metric").astype(float)
  
@@ -2919,8 +2896,9 @@ def plot_persistence_by_distance(
         return axes, summary_df
 
 
-#otros
-
+# Statistical significance Tests
+from scipy.stats import kruskal
+import scikit_posthocs as sp
 def test_interaction_frequency_differences2(
         df_site, freq_col='freq_interactions', n_col='n_interactions',
         metrics=('CN_CI', 'CN_DI', 'CN_II', 'CN_LI', 'CN_GI', 'L1N_LI', 'LBN_LI', 'G1N_GI', 'GBN_GI'),
@@ -2928,47 +2906,46 @@ def test_interaction_frequency_differences2(
         label_dict=None, generate_latex=True, latex_caption='Post-hoc Dunn test (p-values)',
         latex_label='tab:dunn_posthoc'):
     """
-    Test estadistico para saber si la frecuencia media por interaccion
-    (freq_col/n_col) difiere entre las categorias.
- 
-    1. Kruskal-Wallis: compara todas las categorias A LA VEZ -- responde
-       "¿hay AL MENOS una categoria que difiere de las demas?".
-    2. Post-hoc de Dunn (con correccion por comparaciones multiples): SOLO
-       si el Kruskal-Wallis sale significativo, compara TODOS los pares.
- 
-    NUEVO: si generate_latex=True, ademas devuelve el string de una tabla
-    LaTeX (formato booktabs) con la matriz de p-valores de Dunn, lista para
-    pegar en tu documento.
- 
+    Statistical test to determine whether the mean frequency per
+    interaction (freq_col/n_col) differs between categories.
+    1. Kruskal-Wallis: compares all categories AT ONCE -- answers "is there
+       AT LEAST one category that differs from the others?".
+    2. Dunn's post-hoc (with correction for multiple comparisons): ONLY if
+       the Kruskal-Wallis is significant, compares ALL pairs.
+    if generate_latex=True, it also returns the string of a LaTeX table
+    (booktabs format) with the matrix of Dunn p-values, ready to paste into
+    your document.
+
     Parameters
     ----------
     df_site : pd.DataFrame
-        Ya filtrado a UN Site_ID (o varios, si quieres agregar mas puntos).
-    metrics : tuple de str
-        Categorias a comparar.
+        Already filtered to ONE Site_ID (or several, if you want to
+        aggregate more points).
+    metrics : tuple of str
+        Categories to compare.
     alpha : float
-        Umbral de significacion.
+        Significance threshold.
     p_adjust : str
-        Metodo de correccion para el post-hoc de Dunn -- 'holm' (por
-        defecto) o 'bonferroni'.
-    label_dict : dict o None
-        {codigo_metrica: texto legible} -- si se pasa, se usa para las
-        filas/columnas de la tabla LaTeX en vez de los codigos crudos.
+        Correction method for Dunn's post-hoc -- 'holm' (default) or
+        'bonferroni'.
+    label_dict : dict or None
+        {metric_code: readable text} -- if passed, it is used for the rows/
+        columns of the LaTeX table instead of the raw codes.
     generate_latex : bool
-        Si True (por defecto), genera tambien la tabla LaTeX.
+        If True (default), also generates the LaTeX table.
     latex_caption, latex_label : str
-        Caption y label (\\label{}) de la tabla LaTeX.
- 
-    Devuelve
+        Caption and label (\\label{}) of the LaTeX table.
+
+    Returns
     -------
     kw_result : dict
-        {'H': estadistico, 'p_value': float, 'significant': bool}
-    posthoc_df : pd.DataFrame o None
-        Matriz de p-valores (Dunn) -- None si el Kruskal-Wallis no fue
-        significativo.
-    latex_table : str o None
-        La tabla en LaTeX (string) -- None si generate_latex=False o si el
-        Kruskal-Wallis no fue significativo (no hay tabla que generar).
+        {'H': statistic, 'p_value': float, 'significant': bool}
+    posthoc_df : pd.DataFrame or None
+        Matrix of p-values (Dunn) -- None if the Kruskal-Wallis was not
+        significant.
+    latex_table : str or None
+        The LaTeX table (string) -- None if generate_latex=False or if the
+        Kruskal-Wallis was not significant (there is no table to generate).
     """
     df_flat = df_site.reset_index() if df_site.index.nlevels > 1 or df_site.index.name is not None else df_site.copy()
     if label_dict is None:
@@ -3015,26 +2992,28 @@ def test_interaction_frequency_differences2(
         if generate_latex:
             latex_table = _posthoc_to_latex(posthoc_df, label_dict, latex_caption, latex_label, alpha)
     else:
-        print("Como el Kruskal-Wallis no fue significativo, no se hace el post-hoc.")
+        print("Kruskal-Wallis not significant, so no post-hoc.")
  
     return kw_result, posthoc_df, latex_table
  
  
 def _posthoc_to_latex(posthoc_df, label_dict, caption, label, alpha):
     """
-    Convierte la matriz de p-valores de Dunn en una tabla LaTeX (booktabs),
-    con los p-valores significativos marcados en negrita y con asteriscos.
+    Converts the matrix of Dunn p-values into a LaTeX table (booktabs),
+    with significant p-values marked in bold and with asterisks.
     """
     def format_cell(p, is_diagonal):
         if is_diagonal:
             return '--'
         stars = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < alpha else ''
-        formatted = f"{p:.3f}{stars}"
+        formatted = f"{p:.2f}{stars}"
         if p < alpha:
             formatted = f"\\textbf{{{formatted}}}"
         return formatted
  
-    display_labels = [label_dict.get(m, m).replace('_', '\\_') for m in posthoc_df.index]
+    #display_labels = [label_dict.get(m, m).replace('_', '\\_') for m in posthoc_df.index]
+    #display_labels = [ r'\shortstack{' + label_dict.get(m, m).replace('_', '\\_').replace('\n', r'\\') + '}' for m in posthoc_df.index]
+    display_labels=posthoc_df.index
  
     lines = []
     lines.append("\\begin{table}[ht]")
@@ -3067,4 +3046,30 @@ def _posthoc_to_latex(posthoc_df, label_dict, caption, label, alpha):
     return latex_str
  
 
+#mantel test
+def mantel_test(mat_a, mat_b, n_perm=999, seed=0):
+    '''
+    Mantel test: correlates two distance matrices (e.g., change in a network metric vs.
+    geographic or landscape distance between sites) using Spearman's rho on the upper
+    triangle, and assesses significance by permuting rows/columns of one matrix (999 permutations),
+    which accounts for the non-independence of pairwise comparisons.
+    '''
+    sites = mat_a.index.tolist()
+    mat_b = mat_b.loc[sites, sites]  # mismo orden de sitios
 
+    iu = np.triu_indices(len(sites), k=1)
+    vec_a = mat_a.values[iu]
+    vec_b = mat_b.values[iu]
+
+    obs_rho, _ = spearmanr(vec_a, vec_b, nan_policy='omit')
+
+    rng = np.random.default_rng(seed)
+    idx = np.arange(len(sites))
+    perm_rhos = np.empty(n_perm)
+    for i in range(n_perm):
+        perm_idx = rng.permutation(idx)
+        permuted_b = mat_b.values[np.ix_(perm_idx, perm_idx)]
+        perm_rhos[i], _ = spearmanr(vec_a, permuted_b[iu], nan_policy='omit')
+
+    p_value = (np.sum(np.abs(perm_rhos) >= np.abs(obs_rho)) + 1) / (n_perm + 1)
+    return obs_rho, p_value

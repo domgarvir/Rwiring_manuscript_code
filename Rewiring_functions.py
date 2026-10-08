@@ -14,43 +14,45 @@ def distance(x_t1, x_t2, method="euclidean"):
 
 def rewiring_freq_py(A, B):
     """
-    Cuantifica el cambio entre dos redes (A=t1, B=t2) usando la SUMA de frecuencias
-    involucradas en cada categoria, en vez de un ratio de distancia cuantitativa/binaria.
+    Quantify the change between two networks (A=t1, B=t2) using the SUM of the
+    frequencies involved in each category, instead of a quantitative/binary
+    distance ratio.
 
-    Para cada categoria, "freq_sum" es:
-    - Interacciones que se PIERDEN (CN_LI, L1N_LI, LBN_LI): suma de sus frecuencias en A (t1).
-      Ej: se pierden 3 interacciones con frecuencias 2, 3, 1 -> freq_sum = 2+3+1 = 6
-    - Interacciones que se GANAN (CN_GI, G1N_GI, GBN_GI): suma de sus frecuencias en B (t2).
-      Ej: se ganan 4 interacciones con frecuencias 2, 1, 3, 1 -> freq_sum = 2+1+3+1 = 7
-    - Interacciones que PERSISTEN (CN_SI): suma de |freq_t2 - freq_t1| de cada una.
-      Ej: t1=[1,2,3,1], t2=[1,3,2,1] -> freq_sum = |1-1|+|3-2|+|2-3|+|1-1| = 0+1+1+0 = 2
-      Se desglosa ademas por direccion del cambio:
-      - CN_II (increased interactions): cuantas de esas persistentes AUMENTARON de peso,
-        y la suma de cuanto aumentaron. En el ejemplo: 1 interaccion (2->3), freq_sum=1.
-      - CN_DI (decreased interactions): cuantas DISMINUYERON, y la suma de cuanto.
-        En el ejemplo: 1 interaccion (3->2), freq_sum=1.
-      - CN_CI (constant interactions): cuantas NO cambiaron de frecuencia (t2==t1), y
-        cuanta frecuencia acumulan esas interacciones constantes (suma de su frecuencia,
-        que es la misma en t1 y t2). En el ejemplo: 2 interacciones (1->1, 1->1),
-        freq_sum = 1+1 = 2.
-      Las que no cambian (diff=0) no cuentan en CN_II ni CN_DI, pero siguen dentro de CN_SI
-      (y ahora si cuentan, exclusivamente, en CN_CI).
-    - Ausencias estables (CN_SNI, LN_SNI, GN_SNI): siempre 0 (no hay frecuencia que sumar).
+    For each category, "freq_sum" is:
+    - Interactions that are LOST (CN_LI, L1N_LI, LBN_LI): sum of their frequencies in A (t1).
+      E.g., 3 interactions with frequencies 2, 3, 1 are lost -> freq_sum = 2+3+1 = 6
+    - Interactions that are GAINED (CN_GI, G1N_GI, GBN_GI): sum of their frequencies in B (t2).
+      E.g., 4 interactions with frequencies 2, 1, 3, 1 are gained -> freq_sum = 2+1+3+1 = 7
+    - Interactions that PERSIST (CN_SI): sum of |freq_t2 - freq_t1| for each one.
+      E.g., t1=[1,2,3,1], t2=[1,3,2,1] -> freq_sum = |1-1|+|3-2|+|2-3|+|1-1| = 0+1+1+0 = 2
+      This is further broken down by the direction of the change:
+      - CN_II (increased interactions): how many of these persistent interactions
+        INCREASED in strength, and the sum of the increases. In the example:
+        1 interaction (2->3), freq_sum = 1.
+      - CN_DI (decreased interactions): how many DECREASED, and the sum of the decreases.
+        In the example: 1 interaction (3->2), freq_sum = 1.
+      - CN_CI (constant interactions): how many did NOT change in frequency (t2 == t1),
+        and the total frequency these constant interactions add up to (the sum of their
+        frequency, which is the same in t1 and t2). In the example: 2 interactions
+        (1->1, 1->1), freq_sum = 1+1 = 2.
+      Interactions with no change (diff = 0) are not counted in CN_II or CN_DI, but
+      remain within CN_SI (and are now counted, exclusively, in CN_CI).
+    - Stable absences (CN_SNI, LN_SNI, GN_SNI): always 0 (there is no frequency to sum).
 
-    Se reporta tambien "n_interactions" (el conteo, igual que en rewiring_py) para que
-    puedas comparar cuantas interacciones hay en cada categoria frente a cuanta frecuencia
-    representan -- dos interacciones pueden ser el mismo "n" pero muy distinto "freq_sum".
+    "n_interactions" (the count, as in rewiring_py) is also reported so that you can
+    compare how many interactions each category contains against how much frequency
+    they represent -- two categories can have the same "n" but very different "freq_sum".
 
     Parameters
     ----------
     A, B : pd.DataFrame
-        Matrices de interaccion (filas=plantas, columnas=polinizadores) en t1 y t2.
-        Se usan los valores CRUDOS (frecuencias), sin binarizar salvo para clasificar
-        que celda cae en que categoria (presencia/ausencia).
+        Interaction matrices (rows = plants, columns = pollinators) at t1 and t2.
+        RAW values (frequencies) are used; they are binarized only to classify which
+        category each cell falls into (presence/absence).
 
     Returns
     -------
-    pd.DataFrame con columnas: metric, n_interactions, freq_sum, is_derived_total
+    pd.DataFrame with columns: metric, n_interactions, freq_sum, is_derived_total
     """
     A_bin = (A != 0).astype(int)
     B_bin = (B != 0).astype(int)
@@ -64,7 +66,7 @@ def rewiring_freq_py(A, B):
     cols_only_B = B.columns.difference(common_col)
 
     # ------------------------------------------------------------------
-    # bloque comun (ambas especies presentes en A y B)
+  # common block (both species present in A and B)
     # ------------------------------------------------------------------
     CN1 = A.loc[common_row, common_col]
     CN2 = B.loc[common_row, common_col]
@@ -84,8 +86,8 @@ def rewiring_freq_py(A, B):
     freq_CN_LI = float(CN1.values[mask_CN_LI].sum())
     freq_CN_GI = float(CN2.values[mask_CN_GI].sum())
 
-    # --- desglose de CN_SI por direccion del cambio: cuantas AUMENTAN vs DISMINUYEN ---
-    # (las que no cambian -diff=0- no cuentan en ninguna de las dos; siguen dentro de CN_SI)
+    # --- breakdown of CN_SI by direction of change: how many INCREASE vs DECREASE ---
+    # (those that do not change -diff=0- are counted in neither; they remain within CN_SI)
     diff_CN_SI = CN2.values[mask_CN_SI] - CN1.values[mask_CN_SI]
     mask_increase = diff_CN_SI > 0
     mask_decrease = diff_CN_SI < 0
@@ -98,10 +100,10 @@ def rewiring_freq_py(A, B):
     # constant nodes, CONSTANT interactions (freq_t2 == freq_t1, no change at all)
     mask_constant = diff_CN_SI == 0
     n_CN_CI = int(mask_constant.sum())
-    freq_CN_CI = float(CN1.values[mask_CN_SI][mask_constant].sum())  # = freq acumulada (t1=t2 aqui)
+    freq_CN_CI = float(CN1.values[mask_CN_SI][mask_constant].sum())  # = freq cumulative (t1=t2)
 
     # ------------------------------------------------------------------
-    # LN: se pierde una interaccion donde solo UNA especie desaparece
+    # LN: an interaction is lost where only ONE species disappears
     # ------------------------------------------------------------------
     LN = A.copy()
     LN.loc[common_row, common_col] = np.nan
@@ -116,7 +118,7 @@ def rewiring_freq_py(A, B):
     freq_LN_SNI = 0.0
 
     # ------------------------------------------------------------------
-    # LBN: se pierde una interaccion donde AMBAS especies desaparecen
+    # LBN: an interaction is lost where BOTH species disappear
     # ------------------------------------------------------------------
     LBN = A.loc[rows_only_A, cols_only_A]
     mask_LBN_LI = LBN.values > 0
@@ -128,7 +130,7 @@ def rewiring_freq_py(A, B):
     freq_LBN_SNI = 0.0
 
     # ------------------------------------------------------------------
-    # GN: se gana una interaccion donde solo UNA especie es nueva
+    # GN: an interaction is gained where only ONE species is new
     # ------------------------------------------------------------------
     GN = B.copy()
     GN.loc[common_row, common_col] = np.nan
@@ -143,7 +145,7 @@ def rewiring_freq_py(A, B):
     freq_GN_SNI = 0.0
 
     # ------------------------------------------------------------------
-    # GBN: se gana una interaccion donde AMBAS especies son nuevas
+    # GBN: an interaction is gained where BOTH species are new
     # ------------------------------------------------------------------
     GBN = B.loc[rows_only_B, cols_only_B]
     mask_GBN_GI = GBN.values > 0
@@ -155,7 +157,7 @@ def rewiring_freq_py(A, B):
     freq_GBN_SNI = 0.0
 
     # ------------------------------------------------------------------
-    # tabla final: categorias atomicas (sin solapamiento) + totales derivados
+    # final table: atomic categories (no overlap) + derived totals
     # ------------------------------------------------------------------
     atomic_metrics = ["CN_LI", "L1N_LI", "LBN_LI", "CN_GI", "G1N_GI", "GBN_GI",
                        "CN_SI", "CN_SNI", "LN_SNI", "GN_SNI"]
@@ -164,14 +166,14 @@ def rewiring_freq_py(A, B):
     atomic_freq = [freq_CN_LI, freq_L1N_LI, freq_LBN_LI, freq_CN_GI, freq_G1N_GI, freq_GBN_GI,
                    freq_CN_SI, freq_CN_SNI, freq_LN_SNI, freq_GN_SNI]
 
-    # totales derivados (informativos, NO se suman aparte para no duplicar celdas)
-    # LN_LI/GN_GI = descomponen por tipo de nodo; CN_II/CN_DI = descomponen CN_SI por direccion
+    # derived totals (informative, NOT summed separately to avoid double-counting cells)
+    # LN_LI/GN_GI = broken down by node type; CN_II/CN_DI = break down CN_SI by direction
     derived_metrics = ["LN_LI", "GN_GI", "CN_II", "CN_DI"]
     derived_n = [n_L1N_LI + n_LBN_LI, n_G1N_GI + n_GBN_GI, n_CN_II, n_CN_DI]
     derived_freq = [freq_L1N_LI + freq_LBN_LI, freq_G1N_GI + freq_GBN_GI, freq_CN_II, freq_CN_DI]
 
     # ------------------------------------------------------------------
-    # tabla final: SOLO estas 8 categorias, en este orden (por ahora)
+    # final table: ONLY these 8 categories, in this order (for nowa)
     # ------------------------------------------------------------------
     metrics = [ "CN_CI","CN_DI", "CN_II", "CN_LI", "CN_GI", "L1N_LI", "LBN_LI", "G1N_GI", "GBN_GI"]
     n_interactions = [n_CN_CI, n_CN_DI, n_CN_II,  n_CN_LI, n_CN_GI, n_L1N_LI, n_LBN_LI, n_G1N_GI, n_GBN_GI]
@@ -184,17 +186,17 @@ def rewiring_freq_py(A, B):
     })
 
     # ------------------------------------------------------------------
-    # NUEVO -- segunda tabla: conteo de nodos (especies) permanentes/exclusivos.
-    # columnas = polinizadores, index = plantas (convencion de toda la funcion).
+    # Second table: count of permanent/exclusive nodes (species).
+    # columns = pollinators, index = plants (convention used throughout the function).
     # ------------------------------------------------------------------
     node_metrics = ["PA", "PP", "A1", "P1", "A2", "P2"]
     node_counts_values = [
-        len(common_col),   # PA: polinizadores permanentes
-        len(common_row),   # PP: plantas permanentes
-        len(cols_only_A),  # A1: polinizadores exclusivos de t1
-        len(rows_only_A),  # P1: plantas exclusivas de t1
-        len(cols_only_B),  # A2: polinizadores exclusivos de t2
-        len(rows_only_B),  # P2: plantas exclusivas de t2
+        len(common_col),   # PA: permanent pollinators
+        len(common_row),   # PP: permanent plants
+        len(cols_only_A),  # A1: transient pollinators (only in t1)
+        len(rows_only_A),  # P1: transient plants (only in t1)
+        len(cols_only_B),  # A2: transient pollinators (only in t2)
+        len(rows_only_B),  # P2: transient plants (only in t2)
     ]
  
     node_counts = pd.DataFrame({

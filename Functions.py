@@ -2316,6 +2316,9 @@ def plot_species_and_interactions_summary(
 
  
     plt.tight_layout()
+    ax_species.annotate("A", xy=(0, 1), xycoords="axes fraction", xytext=(-5, 14), textcoords="offset points", fontsize=22, fontweight="bold", ha="right")
+    ax_int_top.annotate("B", xy=(0, 1), xycoords="axes fraction", xytext=(-5, 14), textcoords="offset points", fontsize=22, fontweight="bold", ha="right")
+    ax_freq.annotate("C", xy=(0, 1), xycoords="axes fraction", xytext=(-5, 14), textcoords="offset points", fontsize=22, fontweight="bold", ha="right")
  
     return fig, (ax_species, ax_int_top, ax_int_bottom, ax_freq)
  

@@ -72,7 +72,7 @@ direction_summary <- direction_by_transition %>%
 
 direction_summary
 
-readr::write_csv(direction_summary,"direction_summary.csv")
+readr::write_csv(direction_summary,"DATA/PollObs/processed/direction_summary.csv")
 
 # -------------------------------------------------------------------------
 # 2. Relative contribution of the three mechanisms

@@ -34,7 +34,7 @@ install.packages(c(
 remotes::install_github("AlfonsoAllen/Rwiring")
 ```
 
-Further documentation and examples for Rwiring are available in the [GitHub repository](https://github.com/AlfonsoAllen/Rwiring).
+Further documentation and examples for Rwiring are available in the [anonymous GitHub repository](https://anonymous.4open.science/r/Rwiring-C444/).
 
 The R version, system information, and versions of the packages loaded for the analyses are provided in `sessionInfo.txt`.
 

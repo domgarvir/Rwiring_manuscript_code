@@ -61,21 +61,10 @@ install.packages(c(
   "remotes", "dplyr", "tidyr", "purrr", "readr", "lubridate",
   "iNEXT", "ggplot2", "patchwork", "geosphere"
 ))
+remotes::install_github("AlfonsoAllen/Rwiring")
 ```
 
-The Rwiring package source code, documentation, and examples are available in the [anonymised package repository](https://anonymous.4open.science/r/Rwiring-C444/).
-
-Download and extract the package source code, then install it from the directory containing its `DESCRIPTION` file:
-
-```r
-remotes::install_local(
-  "path/to/Rwiring",
-  dependencies = NA,
-  upgrade = "never"
-)
-```
-
-Replace `path/to/Rwiring` with the actual path to the extracted package directory.
+Further documentation and examples for Rwiring are available in the [GitHub repository](https://github.com/AlfonsoAllen/Rwiring).
 
 ### R environment
 
